@@ -8,10 +8,12 @@
 typedef unsigned char byte;
 
 #define DELETED 0x1
-#define BLOCK   0x2
-#define BEAST   0x4
-#define PLAYER  0x8
+#define BLOCK 0x2
+#define BEAST 0x4
+#define PLAYER 0x8
 #define STATIC 0x10
+#define PROCESSED 0x20
+#define ENCLOSED 0x40
 
 typedef struct {
   byte flags;
@@ -36,7 +38,10 @@ int to_x(int ix);
 int to_y(int ix);
 int to_pos(int x, int y);
 bool push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y);
+void checkForEnclosure(entity* grid[], int x, int y);
 void toggleFullScreen(SDL_Window *win);
+void followPath(entity* grid[], int prev_pos, int pos, entity* path[], int len_path);
+int indexOf(entity* ent, entity* path[], int len_path);
 void error(char* activity);
 
 int block_w = 25;
@@ -240,10 +245,15 @@ int main(int num_args, char* args[]) {
                 int orig_x = players[i].x;
                 int orig_y = players[i].y;
                 move(&players[i], grid, players[i].x + dir_x, players[i].y + dir_y);
+                // TODO: just b/c there's a block here doesn't mean we pushed it here
+                // instead, we need to check for a block at x+dir_x/y+dir_y *before* push()
+                checkForEnclosure(grid, players[i].x + dir_x*2, players[i].y + dir_y*2);
                 if (is_spacebar_pressed) {
                   entity* ent_behind = grid[to_pos(orig_x - dir_x, orig_y - dir_y)];
-                  if (ent_behind && (ent_behind->flags & BLOCK) && !(ent_behind->flags & STATIC))
+                  if (ent_behind && (ent_behind->flags & BLOCK) && !(ent_behind->flags & STATIC)) {
                     move(ent_behind, grid, orig_x, orig_y);
+                    checkForEnclosure(grid, orig_x, orig_y);
+                  }
                 }
               }
             }
@@ -283,9 +293,6 @@ int main(int num_args, char* args[]) {
     if (SDL_RenderClear(renderer) < 0)
       error("clearing renderer");
 
-    if (SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255) < 0)
-      error("setting block color");
-
     for (int i = 0; i < num_blocks; ++i) {
       SDL_Rect r = {
         .x = blocks[i].x * block_w - vp.x,
@@ -293,6 +300,14 @@ int main(int num_args, char* args[]) {
         .w = block_w,
         .h = block_h
       };
+      if (blocks[i].flags & ENCLOSED) {
+        if (SDL_SetRenderDrawColor(renderer, 218, 165, 32, 255) < 0)
+          error("setting enclosed block color");
+      }
+      else {
+        if (SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255) < 0)
+          error("setting block color");
+      }
       if (SDL_RenderFillRect(renderer, &r) < 0)
         error("drawing block");
     }
@@ -507,6 +522,78 @@ int to_pos(int x, int y) {
   if (pos >= grid_len)
     error("position out of bounds (greater than grid size)");
   return pos;
+}
+
+// port the algorithm from
+// ~/Unashamed Studios/support/Old Website/future-fortress/action.js
+void checkForEnclosure(entity* grid[], int x, int y) {
+  if ((x < 0 || x >= num_blocks_w) ||
+    (y < 0 || y >= num_blocks_h))
+      return;
+
+  // clear the PROCESSED bit from everything before beginning
+  for (int i = 0; i < grid_len; ++i) {
+    if (grid[i])
+      grid[i]->flags &= (~PROCESSED);
+  }
+
+  int prev_pos = -1;
+  entity* path[0];
+  followPath(grid, prev_pos, to_pos(x, y), path, 0);
+}
+
+void followPath(entity* grid[], int prev_pos, int pos, entity* path[], int len_path) {
+  entity* ent = grid[pos];
+  if (!ent)
+    return;
+
+  // if it's in the path, mark it as an enclosure
+  int ent_path_ix = indexOf(ent, path, len_path);
+  if (ent_path_ix > -1) {
+    for (int i = ent_path_ix; i < len_path; ++i)
+      path[i]->flags |= ENCLOSED;
+    return;
+  }
+
+  // we've branched off & hit something already covered by another branch
+  if (ent->flags & PROCESSED)
+    return;
+
+  // mark it as processed
+  ent->flags |= PROCESSED;
+
+  // clone the path & add the new item to it
+  entity* new_path[len_path + 1];
+  for (int i = 0; i < len_path; ++i)
+    new_path[i] = path[i];
+  new_path[len_path] = grid[pos];
+
+  int x = to_x(pos);
+  int y = to_y(pos);
+  for (int dir_x = -1; dir_x <= 1; dir_x += 2) {
+    for (int dir_y = -1; dir_y <= 1; dir_y += 2) {
+      int new_x = x + dir_x;
+      int new_y = y + dir_y;
+      if ((new_x < 0 || new_x >= num_blocks_w) ||
+        (new_y < 0 || new_y >= num_blocks_h))
+          continue;
+
+      int next_pos = to_pos(new_x, new_y);
+      if (next_pos == prev_pos)
+        continue;
+
+      // TODO: double-check that it's a block flag & not already visited
+      if (grid[next_pos])
+        followPath(grid, pos, next_pos, new_path, len_path + 1);
+    }
+  }
+}
+
+int indexOf(entity* ent, entity* path[], int len_path) {
+  for (int i = 0; i < len_path; ++i)
+    if (path[i] == ent)
+      return i;
+  return -1;
 }
 
 void toggleFullScreen(SDL_Window *win) {
