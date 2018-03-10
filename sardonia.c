@@ -244,10 +244,10 @@ int main(int num_args, char* args[]) {
               if (push(grid, dir_x, dir_y, players[i].x, players[i].y)) {
                 int orig_x = players[i].x;
                 int orig_y = players[i].y;
-                move(&players[i], grid, players[i].x + dir_x, players[i].y + dir_y);
+                move(&players[i], grid, orig_x + dir_x, orig_y + dir_y);
                 // TODO: just b/c there's a block here doesn't mean we pushed it here
                 // instead, we need to check for a block at x+dir_x/y+dir_y *before* push()
-                checkForEnclosure(grid, players[i].x + dir_x*2, players[i].y + dir_y*2);
+                checkForEnclosure(grid, orig_x + dir_x*2, orig_y + dir_y*2);
                 if (is_spacebar_pressed) {
                   entity* ent_behind = grid[to_pos(orig_x - dir_x, orig_y - dir_y)];
                   if (ent_behind && (ent_behind->flags & BLOCK) && !(ent_behind->flags & STATIC)) {
@@ -524,15 +524,24 @@ int to_pos(int x, int y) {
   return pos;
 }
 
+// TODO: instead of walking paths & borders, do a flood-fill
+// disallow edge-blocks, if you touch an edge (define by x/y, not static), then it's not enclosed
+// if an edge is not touched, then hurrah, we have an enclosed area
+// we should be able to have a recursive tree of function calls, if any hit an edge, they return false
+// at the end, we have a true/false result -- at that point, we can either walk them all & flip the ENCLOSED bit or unflip it
+
 void checkForEnclosure(entity* grid[], int x, int y) {
   if ((x < 0 || x >= num_blocks_w) ||
     (y < 0 || y >= num_blocks_h))
       return;
 
   // clear the PROCESSED bit from everything before beginning
+  // temp: clear the ENCLOSED path, to make it easier to see what is currently an enclosure & what is left-over/cached
   for (int i = 0; i < grid_len; ++i) {
-    if (grid[i])
+    if (grid[i]) {
       grid[i]->flags &= (~PROCESSED);
+      grid[i]->flags &= (~ENCLOSED);
+    }
   }
 
   int prev_pos = -1;
@@ -573,9 +582,9 @@ void followPath(entity* grid[], int prev_pos, int pos, entity* path[], int len_p
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
     for (int dir_y = -1; dir_y <= 1; ++dir_y) {
       // don't allow diagonal (or no) movement
-      if (dir_x && dir_y || (!dir_x && !dir_y))
+      if ((dir_x && dir_y) || (!dir_x && !dir_y))
         continue;
-      
+
       int new_x = x + dir_x;
       int new_y = y + dir_y;
       if ((new_x < 0 || new_x >= num_blocks_w) ||
@@ -587,7 +596,7 @@ void followPath(entity* grid[], int prev_pos, int pos, entity* path[], int len_p
         continue;
 
       // TODO: double-check that it's a block flag & not already visited
-      if (grid[next_pos])
+      if (grid[next_pos] && grid[next_pos]->flags & BLOCK)
         followPath(grid, pos, next_pos, new_path, len_path + 1);
     }
   }
