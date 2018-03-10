@@ -524,8 +524,6 @@ int to_pos(int x, int y) {
   return pos;
 }
 
-// port the algorithm from
-// ~/Unashamed Studios/support/Old Website/future-fortress/action.js
 void checkForEnclosure(entity* grid[], int x, int y) {
   if ((x < 0 || x >= num_blocks_w) ||
     (y < 0 || y >= num_blocks_h))
@@ -538,8 +536,10 @@ void checkForEnclosure(entity* grid[], int x, int y) {
   }
 
   int prev_pos = -1;
+  int pos = to_pos(x, y);
+
   entity* path[0];
-  followPath(grid, prev_pos, to_pos(x, y), path, 0);
+  followPath(grid, prev_pos, pos, path, 0);
 }
 
 void followPath(entity* grid[], int prev_pos, int pos, entity* path[], int len_path) {
@@ -547,7 +547,7 @@ void followPath(entity* grid[], int prev_pos, int pos, entity* path[], int len_p
   if (!ent)
     return;
 
-  // if it's in the path, mark it as an enclosure
+  // if the new position is already in the path, we've looped; mark everything as part of the enclosure
   int ent_path_ix = indexOf(ent, path, len_path);
   if (ent_path_ix > -1) {
     for (int i = ent_path_ix; i < len_path; ++i)
@@ -570,8 +570,12 @@ void followPath(entity* grid[], int prev_pos, int pos, entity* path[], int len_p
 
   int x = to_x(pos);
   int y = to_y(pos);
-  for (int dir_x = -1; dir_x <= 1; dir_x += 2) {
-    for (int dir_y = -1; dir_y <= 1; dir_y += 2) {
+  for (int dir_x = -1; dir_x <= 1; ++dir_x) {
+    for (int dir_y = -1; dir_y <= 1; ++dir_y) {
+      // don't allow diagonal (or no) movement
+      if (dir_x && dir_y || (!dir_x && !dir_y))
+        continue;
+      
       int new_x = x + dir_x;
       int new_y = y + dir_y;
       if ((new_x < 0 || new_x >= num_blocks_w) ||
