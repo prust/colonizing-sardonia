@@ -12,8 +12,9 @@ typedef unsigned char byte;
 #define BEAST 0x4
 #define PLAYER 0x8
 #define STATIC 0x10
-#define PROCESSED 0x20
-#define ENCLOSED 0x40
+
+#define PROCESSED 0x01
+#define ENCLOSED 0x02
 
 typedef struct {
   byte flags;
@@ -38,10 +39,9 @@ int to_x(int ix);
 int to_y(int ix);
 int to_pos(int x, int y);
 bool push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y);
-void checkForEnclosure(entity* grid[], int x, int y);
+void checkForEnclosure(entity* grid[], byte enclosures[], int x, int y);
 void toggleFullScreen(SDL_Window *win);
-void followPath(entity* grid[], int prev_pos, int pos, entity* path[], int len_path);
-int indexOf(entity* ent, entity* path[], int len_path);
+bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos);
 void error(char* activity);
 
 int block_w = 25;
@@ -83,8 +83,11 @@ int main(int num_args, char* args[]) {
 
   grid_len = num_blocks_w * num_blocks_h;
   entity* grid[grid_len];
-  for (int i = 0; i < grid_len; ++i)
+  byte enclosures[grid_len];
+  for (int i = 0; i < grid_len; ++i) {
     grid[i] = NULL;
+    enclosures[i] = 0;
+  }
 
   int num_static_blocks = num_blocks_w * 2 + (num_blocks_h - 2) * 2 + 10;
   entity static_blocks[num_static_blocks];
@@ -247,12 +250,12 @@ int main(int num_args, char* args[]) {
                 move(&players[i], grid, orig_x + dir_x, orig_y + dir_y);
                 // TODO: just b/c there's a block here doesn't mean we pushed it here
                 // instead, we need to check for a block at x+dir_x/y+dir_y *before* push()
-                checkForEnclosure(grid, orig_x + dir_x*2, orig_y + dir_y*2);
+                checkForEnclosure(grid, enclosures, orig_x + dir_x*2, orig_y + dir_y*2);
                 if (is_spacebar_pressed) {
                   entity* ent_behind = grid[to_pos(orig_x - dir_x, orig_y - dir_y)];
                   if (ent_behind && (ent_behind->flags & BLOCK) && !(ent_behind->flags & STATIC)) {
                     move(ent_behind, grid, orig_x, orig_y);
-                    checkForEnclosure(grid, orig_x, orig_y);
+                    checkForEnclosure(grid, enclosures, orig_x, orig_y);
                   }
                 }
               }
@@ -293,6 +296,24 @@ int main(int num_args, char* args[]) {
     if (SDL_RenderClear(renderer) < 0)
       error("clearing renderer");
 
+    if (SDL_SetRenderDrawColor(renderer, 218, 165, 32, 255) < 0)
+      error("setting enclosed block color");
+    for (int pos = 0; pos < grid_len; ++pos) {
+      if (enclosures[pos] & ENCLOSED) {
+        SDL_Rect r = {
+          .x = to_x(pos) * block_w - vp.x,
+          .y = to_y(pos) * block_h - vp.y,
+          .w = block_w,
+          .h = block_h
+        };
+        if (SDL_RenderFillRect(renderer, &r) < 0)
+          error("drawing enclosed area");
+      }
+    }
+
+    if (SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255) < 0)
+      error("setting block color");
+    
     for (int i = 0; i < num_blocks; ++i) {
       SDL_Rect r = {
         .x = blocks[i].x * block_w - vp.x,
@@ -300,14 +321,6 @@ int main(int num_args, char* args[]) {
         .w = block_w,
         .h = block_h
       };
-      if (blocks[i].flags & ENCLOSED) {
-        if (SDL_SetRenderDrawColor(renderer, 218, 165, 32, 255) < 0)
-          error("setting enclosed block color");
-      }
-      else {
-        if (SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255) < 0)
-          error("setting block color");
-      }
       if (SDL_RenderFillRect(renderer, &r) < 0)
         error("drawing block");
     }
@@ -524,67 +537,75 @@ int to_pos(int x, int y) {
   return pos;
 }
 
-// TODO: instead of walking paths & borders, do a flood-fill
-// disallow edge-blocks, if you touch an edge (define by x/y, not static), then it's not enclosed
-// if an edge is not touched, then hurrah, we have an enclosed area
-// we should be able to have a recursive tree of function calls, if any hit an edge, they return false
-// at the end, we have a true/false result -- at that point, we can either walk them all & flip the ENCLOSED bit or unflip it
-
-void checkForEnclosure(entity* grid[], int x, int y) {
+void checkForEnclosure(entity* grid[], byte enclosures[], int x, int y) {
   if ((x < 0 || x >= num_blocks_w) ||
     (y < 0 || y >= num_blocks_h))
       return;
 
   // clear the PROCESSED bit from everything before beginning
-  // temp: clear the ENCLOSED path, to make it easier to see what is currently an enclosure & what is left-over/cached
   for (int i = 0; i < grid_len; ++i) {
-    if (grid[i]) {
-      grid[i]->flags &= (~PROCESSED);
-      grid[i]->flags &= (~ENCLOSED);
-    }
+    enclosures[i] &= (~PROCESSED);
+//    enclosures[i] &= (~ENCLOSED);
   }
 
   int prev_pos = -1;
-  int pos = to_pos(x, y);
 
-  entity* path[0];
-  followPath(grid, prev_pos, pos, path, 0);
+  for (int dir_x = -1; dir_x <= 1; ++dir_x) {
+    for (int dir_y = -1; dir_y <= 1; ++dir_y) {
+      // check the bounds
+      int new_x = x + dir_x;
+      int new_y = y + dir_y;
+      if ((new_x < 0 || new_x >= num_blocks_w) ||
+        (new_y < 0 || new_y >= num_blocks_h))
+          continue;
+
+      int pos = to_pos(new_x, new_y);
+      
+      // if it's a block, skip it (only flood-fill non-blocks)
+      if (grid[pos] && grid[pos]->flags & BLOCK)
+        continue;
+
+      bool is_enclosed = floodFill(grid, enclosures, prev_pos, pos);
+
+      for (int i = 0; i < grid_len; ++i) {
+        if (enclosures[i] & PROCESSED) {
+          // clear the processed bit
+          enclosures[i] &= (~PROCESSED);
+          // set the ENCLOSED bit
+          if (is_enclosed)
+            enclosures[i] |= ENCLOSED;
+          else // clear the ENCLOSED bit
+            enclosures[i] &= (~ENCLOSED);
+        }
+      }
+    }
+  }
 }
 
-void followPath(entity* grid[], int prev_pos, int pos, entity* path[], int len_path) {
-  entity* ent = grid[pos];
-  if (!ent)
-    return;
-
-  // if the new position is already in the path, we've looped; mark everything as part of the enclosure
-  int ent_path_ix = indexOf(ent, path, len_path);
-  if (ent_path_ix > -1) {
-    for (int i = ent_path_ix; i < len_path; ++i)
-      path[i]->flags |= ENCLOSED;
-    return;
-  }
-
-  // we've branched off & hit something already covered by another branch
-  if (ent->flags & PROCESSED)
-    return;
-
-  // mark it as processed
-  ent->flags |= PROCESSED;
-
-  // clone the path & add the new item to it
-  entity* new_path[len_path + 1];
-  for (int i = 0; i < len_path; ++i)
-    new_path[i] = path[i];
-  new_path[len_path] = grid[pos];
-
+// instead of walking paths & borders, do a flood-fill
+// disallow edge-blocks, if you touch an edge (define by x/y, not static), then it's not enclosed
+// if an edge is not touched, then hurrah, we have an enclosed area
+// we should be able to have a recursive tree of function calls, if any hit an edge, they return false
+// at the end, we have a true/false result -- at that point, we can either walk them all & flip the ENCLOSED bit or unflip it
+bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos) {
   int x = to_x(pos);
   int y = to_y(pos);
+  //printf("%d, %d\n", x, y);
+
+  // we've branched off & hit something already covered by another branch
+  if (enclosures[pos] & PROCESSED)
+    return true;
+
+  // mark it as processed
+  enclosures[pos] |= PROCESSED;
+
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
     for (int dir_y = -1; dir_y <= 1; ++dir_y) {
       // don't allow diagonal (or no) movement
       if ((dir_x && dir_y) || (!dir_x && !dir_y))
         continue;
 
+      // check the bounds
       int new_x = x + dir_x;
       int new_y = y + dir_y;
       if ((new_x < 0 || new_x >= num_blocks_w) ||
@@ -595,18 +616,16 @@ void followPath(entity* grid[], int prev_pos, int pos, entity* path[], int len_p
       if (next_pos == prev_pos)
         continue;
 
-      // TODO: double-check that it's a block flag & not already visited
-      if (grid[next_pos] && grid[next_pos]->flags & BLOCK)
-        followPath(grid, pos, next_pos, new_path, len_path + 1);
+      // if we hit one of the edges, then this is *not* enclosed
+      if (new_x == 0 || new_y == 0 || new_x == num_blocks_w - 1 || new_y == num_blocks_h - 1)
+        return false;
+
+      if (!grid[next_pos] || !(grid[next_pos]->flags & BLOCK))
+        if (!floodFill(grid, enclosures, pos, next_pos))
+          return false;
     }
   }
-}
-
-int indexOf(entity* ent, entity* path[], int len_path) {
-  for (int i = 0; i < len_path; ++i)
-    if (path[i] == ent)
-      return i;
-  return -1;
+  return true;
 }
 
 void toggleFullScreen(SDL_Window *win) {
