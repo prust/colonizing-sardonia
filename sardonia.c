@@ -256,7 +256,15 @@ int main(int num_args, char* args[]) {
 
               if (push(grid, dir_x, dir_y, players[i].x, players[i].y)) {
                 move(&players[i], grid, new_x, new_y);
-                // TODO: check each pushed block for a new enclosure created/destroyed
+                // TODO: check all pushed blocks for created/destroyed
+                // fortresses, not just the 1st one
+
+                // TODO: for the destroyed check, we need to check
+                // everything adjacent to the *previous* position, not the
+                // new position
+
+                // TODO: if a previous enclosure is destroyed, we need to walk
+                // (via flood-fill) *all* adjacent blocks & flip the ENCLOSURE bit
                 if (pushed_ent && pushed_ent->flags & BLOCK)
                   checkForEnclosure(grid, enclosures, pushed_ent->x, pushed_ent->y);
                 
@@ -338,6 +346,11 @@ int main(int num_args, char* args[]) {
       error("setting block color");
 
     for (int i = 0; i < num_static_blocks; ++i) {
+      // don't render the border blocks
+      if (static_blocks[i].x == 0 || static_blocks[i].x == num_blocks_w - 1 ||
+        static_blocks[i].y == 0 || static_blocks[i].y == num_blocks_h - 1)
+        continue;
+
       SDL_Rect r = {
         .x = static_blocks[i].x * block_w - vp.x,
         .y = static_blocks[i].y * block_h - vp.y,
