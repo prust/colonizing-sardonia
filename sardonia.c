@@ -244,18 +244,27 @@ int main(int num_args, char* args[]) {
             }
 
             if ((dir_x || dir_y) && !(players[i].flags & DELETED)) {
+              int orig_x = players[i].x;
+              int orig_y = players[i].y;
+              int new_x = orig_x + dir_x;
+              int new_y = orig_y + dir_y;
+              entity* pushed_ent = NULL;
+              if (new_x >= 0 && new_x < num_blocks_w &&
+                  new_y >= 0 && new_y < num_blocks_h) {
+                pushed_ent = grid[to_pos(new_x, new_y)];
+              }
+
               if (push(grid, dir_x, dir_y, players[i].x, players[i].y)) {
-                int orig_x = players[i].x;
-                int orig_y = players[i].y;
-                move(&players[i], grid, orig_x + dir_x, orig_y + dir_y);
-                // TODO: just b/c there's a block here doesn't mean we pushed it here
-                // instead, we need to check for a block at x+dir_x/y+dir_y *before* push()
-                checkForEnclosure(grid, enclosures, orig_x + dir_x*2, orig_y + dir_y*2);
+                move(&players[i], grid, new_x, new_y);
+                // TODO: check each pushed block for a new enclosure created/destroyed
+                if (pushed_ent && pushed_ent->flags & BLOCK)
+                  checkForEnclosure(grid, enclosures, pushed_ent->x, pushed_ent->y);
+                
                 if (is_spacebar_pressed) {
                   entity* ent_behind = grid[to_pos(orig_x - dir_x, orig_y - dir_y)];
                   if (ent_behind && (ent_behind->flags & BLOCK) && !(ent_behind->flags & STATIC)) {
                     move(ent_behind, grid, orig_x, orig_y);
-                    checkForEnclosure(grid, enclosures, orig_x, orig_y);
+                    checkForEnclosure(grid, enclosures, ent_behind->x, ent_behind->y);
                   }
                 }
               }
@@ -296,7 +305,7 @@ int main(int num_args, char* args[]) {
     if (SDL_RenderClear(renderer) < 0)
       error("clearing renderer");
 
-    if (SDL_SetRenderDrawColor(renderer, 218, 165, 32, 255) < 0)
+    if (SDL_SetRenderDrawColor(renderer, 150, 140, 100, 255) < 0)
       error("setting enclosed block color");
     for (int pos = 0; pos < grid_len; ++pos) {
       if (enclosures[pos] & ENCLOSED) {
@@ -543,10 +552,8 @@ void checkForEnclosure(entity* grid[], byte enclosures[], int x, int y) {
       return;
 
   // clear the PROCESSED bit from everything before beginning
-  for (int i = 0; i < grid_len; ++i) {
+  for (int i = 0; i < grid_len; ++i)
     enclosures[i] &= (~PROCESSED);
-//    enclosures[i] &= (~ENCLOSED);
-  }
 
   int prev_pos = -1;
 
@@ -601,8 +608,8 @@ bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos) {
 
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
     for (int dir_y = -1; dir_y <= 1; ++dir_y) {
-      // don't allow diagonal (or no) movement
-      if ((dir_x && dir_y) || (!dir_x && !dir_y))
+      // disallow no movement
+      if (!dir_x && !dir_y)
         continue;
 
       // check the bounds
