@@ -572,12 +572,19 @@ void checkForEnclosure(entity* grid[], byte enclosures[], int x, int y) {
       if (grid[pos] && grid[pos]->flags & BLOCK)
         continue;
 
+      // if we processed this square in the last flood-fill, skip it
+      if (enclosures[pos] & PROCESSED)
+        continue;
+
+      // clear the processed bits from the last flood-fill
+      for (int i = 0; i < grid_len; ++i)
+        if (enclosures[i] & PROCESSED)
+          enclosures[i] &= (~PROCESSED);
+      
       bool is_enclosed = floodFill(grid, enclosures, prev_pos, pos);
 
       for (int i = 0; i < grid_len; ++i) {
         if (enclosures[i] & PROCESSED) {
-          // clear the processed bit
-          enclosures[i] &= (~PROCESSED);
           // set the ENCLOSED bit
           if (is_enclosed)
             enclosures[i] |= ENCLOSED;
