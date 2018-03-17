@@ -38,7 +38,7 @@ void remove_from_grid(entity* ent, entity* grid[]);
 int to_x(int ix);
 int to_y(int ix);
 int to_pos(int x, int y);
-bool push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y);
+int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y);
 void checkForEnclosure(entity* grid[], byte enclosures[], int x, int y);
 void toggleFullScreen(SDL_Window *win);
 bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos);
@@ -254,7 +254,7 @@ int main(int num_args, char* args[]) {
                 pushed_ent = grid[to_pos(new_x, new_y)];
               }
 
-              if (push(grid, dir_x, dir_y, players[i].x, players[i].y)) {
+              if (push(grid, dir_x, dir_y, players[i].x, players[i].y) > -1) {
                 move(&players[i], grid, new_x, new_y);
                 // TODO: check all pushed blocks for created/destroyed
                 // fortresses, not just the 1st one
@@ -473,25 +473,27 @@ int main(int num_args, char* args[]) {
   return 0;
 }
 
-bool push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y) {
+int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y) {
   entity* first_ent = grid[to_pos(pos_x + dir_x, pos_y + dir_y)];
   if (!first_ent)
-    return true;
+    return 0;
   if (first_ent->flags & STATIC)
-    return false;
+    return -1;
 
   int second_x = pos_x + dir_x*2;
   int second_y = pos_y + dir_y*2;
-  bool can_push;
+  int num_blocks_pushed;
   entity* second_ent = grid[to_pos(second_x, second_y)];
   if (!second_ent) {
-    can_push = true;
+    num_blocks_pushed = 1;
   }
   else if (second_ent->flags & BLOCK) {
-    can_push = push(grid, dir_x, dir_y, pos_x + dir_x, pos_y + dir_y);
+    num_blocks_pushed = push(grid, dir_x, dir_y, pos_x + dir_x, pos_y + dir_y);
+    if (num_blocks_pushed > -1)
+      num_blocks_pushed++;
   }
   else if (second_ent->flags & PLAYER) {
-    can_push = false;
+    num_blocks_pushed = -1;
   }
   else if (second_ent->flags & BEAST) {
     // if there's a block on the other side, squish beast between blocks
@@ -499,17 +501,17 @@ bool push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y) {
     if (third_ent && third_ent->flags & BLOCK) {
       second_ent->flags |= DELETED; // turn deleted bit on
       remove_from_grid(second_ent, grid);
-      can_push = true;
+      num_blocks_pushed = 0;
     }
     else {
-      can_push = false;
+      num_blocks_pushed = -1;
     }
   }
 
-  if (can_push)
+  if (num_blocks_pushed > -1)
     move(first_ent, grid, second_x, second_y);
 
-  return can_push;
+  return num_blocks_pushed;
 }
 
 int findAvailPos(entity* grid[]) {
