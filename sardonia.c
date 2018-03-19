@@ -39,9 +39,10 @@ int to_x(int ix);
 int to_y(int ix);
 int to_pos(int x, int y);
 int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y);
-void checkForEnclosure(entity* grid[], byte enclosures[], int x, int y);
+void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check);
 void toggleFullScreen(SDL_Window *win);
 bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos);
+void floodClear(entity* grid[], byte enclosures[], int pos);
 void error(char* activity);
 
 int block_w = 25;
@@ -254,25 +255,33 @@ int main(int num_args, char* args[]) {
                 pushed_ent = grid[to_pos(new_x, new_y)];
               }
 
-              if (push(grid, dir_x, dir_y, players[i].x, players[i].y) > -1) {
+              int num_blocks_pushed = push(grid, dir_x, dir_y, players[i].x, players[i].y);
+              if (num_blocks_pushed > -1) {
                 move(&players[i], grid, new_x, new_y);
-                // TODO: check all pushed blocks for created/destroyed
-                // fortresses, not just the 1st one
+                if (num_blocks_pushed > 0 && pushed_ent) {
+                  // check if previous enclosure was just broken
+                  checkForEnclosures(grid, enclosures, pushed_ent->x - dir_x, pushed_ent->y - dir_y, false);
+                  // check if we just expanded an enclosure
+                  if (enclosures[to_pos(orig_x, orig_y)] & ENCLOSED)
+                    enclosures[to_pos(new_x, new_y)] |= ENCLOSED;
 
-                // TODO: for the destroyed check, we need to check
-                // everything adjacent to the *previous* position, not the
-                // new position
+                  int final_x = new_x;
+                  int final_y = new_y;
+                  if (dir_x)
+                    final_x += num_blocks_pushed * dir_x;
+                  else if (dir_y)
+                    final_y += num_blocks_pushed * dir_y;
 
-                // TODO: if a previous enclosure is destroyed, we need to walk
-                // (via flood-fill) *all* adjacent blocks & flip the ENCLOSURE bit
-                if (pushed_ent && pushed_ent->flags & BLOCK)
-                  checkForEnclosure(grid, enclosures, pushed_ent->x, pushed_ent->y);
+                  // check the last pushed block to see if a new enclosure was just created
+                  checkForEnclosures(grid, enclosures, final_x, final_y, true);
+                }
                 
                 if (is_spacebar_pressed) {
                   entity* ent_behind = grid[to_pos(orig_x - dir_x, orig_y - dir_y)];
                   if (ent_behind && (ent_behind->flags & BLOCK) && !(ent_behind->flags & STATIC)) {
                     move(ent_behind, grid, orig_x, orig_y);
-                    checkForEnclosure(grid, enclosures, ent_behind->x, ent_behind->y);
+                    checkForEnclosures(grid, enclosures, orig_x - dir_x, orig_y - dir_y, false);
+                    checkForEnclosures(grid, enclosures, ent_behind->x, ent_behind->y, true);
                   }
                 }
               }
@@ -561,7 +570,8 @@ int to_pos(int x, int y) {
   return pos;
 }
 
-void checkForEnclosure(entity* grid[], byte enclosures[], int x, int y) {
+// check all sides of the last pushed block for newly-created enclosures
+void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check) {
   if ((x < 0 || x >= num_blocks_w) ||
     (y < 0 || y >= num_blocks_h))
       return;
@@ -569,8 +579,6 @@ void checkForEnclosure(entity* grid[], byte enclosures[], int x, int y) {
   // clear the PROCESSED bit from everything before beginning
   for (int i = 0; i < grid_len; ++i)
     enclosures[i] &= (~PROCESSED);
-
-  int prev_pos = -1;
 
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
     for (int dir_y = -1; dir_y <= 1; ++dir_y) {
@@ -596,16 +604,17 @@ void checkForEnclosure(entity* grid[], byte enclosures[], int x, int y) {
         if (enclosures[i] & PROCESSED)
           enclosures[i] &= (~PROCESSED);
       
-      bool is_enclosed = floodFill(grid, enclosures, prev_pos, pos);
+      // everything that can flood-fill is enclosed; mark it as such
+      int prev_pos = -1;
+      bool is_enclosure = floodFill(grid, enclosures, prev_pos, pos);
 
-      for (int i = 0; i < grid_len; ++i) {
-        if (enclosures[i] & PROCESSED) {
-          // set the ENCLOSED bit
-          if (is_enclosed)
+      if (new_check && is_enclosure) {
+        for (int i = 0; i < grid_len; ++i)
+          if (enclosures[i] & PROCESSED)
             enclosures[i] |= ENCLOSED;
-          else // clear the ENCLOSED bit
-            enclosures[i] &= (~ENCLOSED);
-        }
+      }
+      else if (!new_check && !is_enclosure && enclosures[pos] & ENCLOSED) {
+        floodClear(grid, enclosures, pos);
       }
     }
   }
@@ -655,6 +664,35 @@ bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos) {
     }
   }
   return true;
+}
+
+void floodClear(entity* grid[], byte enclosures[], int pos) {
+  if (!(enclosures[pos] & ENCLOSED))
+    return;
+
+  // clear the ENCLOSURE bit
+  enclosures[pos] &= (~ENCLOSED);
+
+  int x = to_x(pos);
+  int y = to_y(pos);
+  for (int dir_x = -1; dir_x <= 1; ++dir_x) {
+    for (int dir_y = -1; dir_y <= 1; ++dir_y) {
+      // disallow no movement
+      if (!dir_x && !dir_y)
+        continue;
+
+      // check the bounds
+      int new_x = x + dir_x;
+      int new_y = y + dir_y;
+      if ((new_x < 0 || new_x >= num_blocks_w) ||
+        (new_y < 0 || new_y >= num_blocks_h))
+          continue;
+
+      int next_pos = to_pos(new_x, new_y);
+      if (!grid[next_pos] || !(grid[next_pos]->flags & BLOCK))
+        floodClear(grid, enclosures, next_pos);
+    }
+  }
 }
 
 void toggleFullScreen(SDL_Window *win) {
