@@ -194,6 +194,16 @@ int main(int num_args, char* args[]) {
           if (evt.window.event == SDL_WINDOWEVENT_RESIZED)
             SDL_GetWindowSize(window, &vp.w, &vp.h);
           break;
+        case SDL_MOUSEMOTION:
+          if (selected && (evt.motion.state & SDL_BUTTON_LMASK)) {
+            int x = (evt.button.x + vp.x) / block_w;
+            int y = (evt.button.y + vp.y) / block_h;
+            int dir_x = x - selected->x;
+            int dir_y = y - selected->y;
+            if ((dir_x || dir_y) && abs(dir_x) <= 1 && abs(dir_y) <= 1)
+              move(selected, grid, x, y);
+          }
+          break;
         case SDL_MOUSEBUTTONDOWN:
           if (evt.button.button == SDL_BUTTON_LEFT) {
             int x = (evt.button.x + vp.x) / block_w;
