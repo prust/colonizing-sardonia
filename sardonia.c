@@ -2,6 +2,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 
 #include "SDL.h"
 
@@ -43,6 +44,8 @@ void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool ne
 void toggleFullScreen(SDL_Window *win);
 bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos);
 void floodClear(entity* grid[], byte enclosures[], int pos);
+int imin(int i, int j);
+bool inBounds(int x, int y);
 void error(char* activity);
 
 int block_w = 25;
@@ -166,6 +169,9 @@ int main(int num_args, char* args[]) {
   SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
   if (!renderer)
     error("creating renderer");
+
+  if (SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) < 0)
+    error("setting blend mode");
 
   bool is_gameover = false;
   int p1_dir_x = 0;
@@ -400,6 +406,48 @@ int main(int num_args, char* args[]) {
       };
       if (SDL_RenderFillRect(renderer, &beast_rect) < 0)
         error("filling beast rect");
+    }
+
+    // draw darkness
+    for (int pos = 0; pos < grid_len; ++pos) {
+      int x = to_x(pos);
+      int y = to_y(pos);
+
+      if ((enclosures[pos] & ENCLOSED) ||
+        (inBounds(x + 1, y) && enclosures[to_pos(x + 1, y)] & ENCLOSED) ||
+        (inBounds(x + 1, y + 1) && enclosures[to_pos(x + 1, y + 1)] & ENCLOSED) ||
+        (inBounds(x, y + 1) && enclosures[to_pos(x, y + 1)] & ENCLOSED) ||
+        (inBounds(x - 1, y) && enclosures[to_pos(x - 1, y)] & ENCLOSED) ||
+        (inBounds(x - 1, y - 1) && enclosures[to_pos(x - 1, y - 1)] & ENCLOSED) ||
+        (inBounds(x, y - 1) && enclosures[to_pos(x, y - 1)] & ENCLOSED) ||
+        (inBounds(x + 1, y - 1) && enclosures[to_pos(x + 1, y - 1)] & ENCLOSED) ||
+        (inBounds(x - 1, y + 1) && enclosures[to_pos(x - 1, y + 1)] & ENCLOSED))
+        continue;
+      
+
+      double dist = -1;
+      for (int i = 0; i < num_players; ++i) {
+        if (players[i].flags & DELETED)
+          continue;
+
+        double player_dist = sqrt(pow(players[i].x - x, 2) + pow(players[i].y - y, 2));
+        if (dist == -1 || player_dist < dist)
+          dist = player_dist;
+      }
+
+      if (dist > 10) {
+        SDL_Rect darkness = {
+          .x = x * block_w - vp.x,
+          .y = y * block_h - vp.y,
+          .w = block_w,
+          .h = block_h
+        };
+
+        if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200) < 0)
+          error("setting darkness color");
+        if (SDL_RenderFillRect(renderer, &darkness) < 0)
+          error("filling darkness rect");
+      }
     }
 
     if (SDL_GetTicks() - last_move_time >= beast_speed) {
@@ -704,6 +752,18 @@ void toggleFullScreen(SDL_Window *win) {
 
   if (SDL_SetWindowFullscreen(win, flags) < 0)
     error("Toggling fullscreen mode failed");
+}
+
+int imin(int i, int j) {
+  if (i < j)
+    return i;
+  else
+    return j;
+}
+
+bool inBounds(int x, int y) {
+  return x >= 0 && x < num_blocks_w &&
+    y >= 0 && y < num_blocks_h;
 }
 
 void error(char* activity) {
