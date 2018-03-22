@@ -225,6 +225,18 @@ int main(int num_args, char* args[]) {
             case SDLK_w:
               p2_dir_y = -1;
               break;
+            case SDLK_MINUS:
+              if ((evt.key.keysym.mod & KMOD_LSHIFT) || (evt.key.keysym.mod & KMOD_RSHIFT)) {
+                block_w /= 2;
+                block_h /= 2;
+              }
+              break;
+            case SDLK_EQUALS:
+              if ((evt.key.keysym.mod & KMOD_LSHIFT) || (evt.key.keysym.mod & KMOD_RSHIFT)) {
+                block_w *= 2;
+                block_h *= 2;
+              }
+              break;
             case SDLK_f:
               toggleFullScreen(window);
               break;
