@@ -250,6 +250,8 @@ int main(int num_args, char* args[]) {
               if ((evt.key.keysym.mod & KMOD_LSHIFT) || (evt.key.keysym.mod & KMOD_RSHIFT)) {
                 block_w /= 2;
                 block_h /= 2;
+                vp.x = 0;
+                vp.y = 0;
               }
               break;
             case SDLK_EQUALS:
