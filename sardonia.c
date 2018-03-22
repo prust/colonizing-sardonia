@@ -13,6 +13,7 @@ typedef unsigned char byte;
 #define BEAST 0x4
 #define PLAYER 0x8
 #define STATIC 0x10
+#define SELECTED 0x20
 
 #define PROCESSED 0x01
 #define ENCLOSED 0x02
@@ -50,7 +51,7 @@ void error(char* activity);
 
 int block_w = 25;
 int block_h = 25;
-int block_density_pct = 30;
+int block_density_pct = 20;
 int starting_distance = 15;
 
 const int num_players = 2;
@@ -88,6 +89,7 @@ int main(int num_args, char* args[]) {
   grid_len = num_blocks_w * num_blocks_h;
   entity* grid[grid_len];
   byte enclosures[grid_len];
+  entity* selected = NULL;
   for (int i = 0; i < grid_len; ++i) {
     grid[i] = NULL;
     enclosures[i] = 0;
@@ -161,8 +163,8 @@ int main(int num_args, char* args[]) {
   window = SDL_CreateWindow("Beast", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, num_blocks_w * block_w, num_blocks_h * block_h, SDL_WINDOW_RESIZABLE);
   if (!window)
     error("creating window");
-  if (SDL_ShowCursor(SDL_DISABLE) < 0)
-    error("hiding cursor");
+  // if (SDL_ShowCursor(SDL_DISABLE) < 0)
+  //   error("hiding cursor");
 
   SDL_GetWindowSize(window, &vp.w, &vp.h);
 
@@ -191,6 +193,25 @@ int main(int num_args, char* args[]) {
         case SDL_WINDOWEVENT:
           if (evt.window.event == SDL_WINDOWEVENT_RESIZED)
             SDL_GetWindowSize(window, &vp.w, &vp.h);
+          break;
+        case SDL_MOUSEBUTTONDOWN:
+          if (evt.button.button == SDL_BUTTON_LEFT) {
+            int x = (evt.button.x + vp.x) / block_w;
+            int y = (evt.button.y + vp.y) / block_h;
+            int pos = to_pos(x, y);
+            if (grid[pos] && (grid[pos]->flags & BLOCK) &&
+              !(grid[pos]->flags & STATIC)) {
+                if (selected)
+                  selected->flags &= ~SELECTED;
+                grid[pos]->flags |= SELECTED;
+                selected = grid[pos];
+            }
+            else if (!grid[pos] && selected) {
+              selected->flags &= ~SELECTED;
+              move(selected, grid, x, y);
+              selected = NULL;
+            }
+          }
           break;
         case SDL_KEYDOWN:
           p1_dir_x = 0;
@@ -354,9 +375,6 @@ int main(int num_args, char* args[]) {
           error("drawing enclosed area");
       }
     }
-
-    if (SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255) < 0)
-      error("setting block color");
     
     for (int i = 0; i < num_blocks; ++i) {
       SDL_Rect r = {
@@ -365,6 +383,14 @@ int main(int num_args, char* args[]) {
         .w = block_w,
         .h = block_h
       };
+      if (blocks[i].flags & SELECTED) {
+        if (SDL_SetRenderDrawColor(renderer, 50, 50, 200, 255) < 0)
+          error("setting selected block color");
+      }
+      else {
+        if (SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255) < 0)
+          error("setting block color");
+      }
       if (SDL_RenderFillRect(renderer, &r) < 0)
         error("drawing block");
     }
@@ -455,7 +481,7 @@ int main(int num_args, char* args[]) {
           .h = block_h
         };
 
-        if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200) < 0)
+        if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 150) < 0)
           error("setting darkness color");
         if (SDL_RenderFillRect(renderer, &darkness) < 0)
           error("filling darkness rect");
