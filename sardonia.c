@@ -18,6 +18,12 @@ typedef unsigned char byte;
 #define PROCESSED 0x01
 #define ENCLOSED 0x02
 
+#define PICKING_UP 0
+#define PLACING 1
+
+short mode = PICKING_UP;
+int num_collected_blocks = 0;
+
 typedef struct {
   byte flags;
   int x;
@@ -89,13 +95,12 @@ int main(int num_args, char* args[]) {
   grid_len = num_blocks_w * num_blocks_h;
   entity* grid[grid_len];
   byte enclosures[grid_len];
-  entity* selected = NULL;
   for (int i = 0; i < grid_len; ++i) {
     grid[i] = NULL;
     enclosures[i] = 0;
   }
 
-  int num_static_blocks = num_blocks_w * 2 + (num_blocks_h - 2) * 2 + 10;
+  int num_static_blocks = num_blocks_w * 2 + (num_blocks_h - 2) * 2 + 50;
   entity static_blocks[num_static_blocks];
   int ix = 0;
   for (int x = 0; x < num_blocks_w; ++x) {
@@ -195,13 +200,27 @@ int main(int num_args, char* args[]) {
             SDL_GetWindowSize(window, &vp.w, &vp.h);
           break;
         case SDL_MOUSEMOTION:
-          if (selected && (evt.motion.state & SDL_BUTTON_LMASK)) {
+          if (evt.motion.state & SDL_BUTTON_LMASK) {
             int x = (evt.button.x + vp.x) / block_w;
             int y = (evt.button.y + vp.y) / block_h;
-            int dir_x = x - selected->x;
-            int dir_y = y - selected->y;
-            if ((dir_x || dir_y) && abs(dir_x) <= 1 && abs(dir_y) <= 1)
-              move(selected, grid, x, y);
+            int pos = to_pos(x, y);
+            if (grid[pos] && mode == PICKING_UP && grid[pos]->flags & BLOCK && !(grid[pos]->flags & STATIC)) {
+              // DRY violation w/ below (MOUSEBUTTONDOWN handler)
+              num_collected_blocks++;
+              grid[pos]->flags |= DELETED;
+              remove_from_grid(grid[pos], grid);
+            }
+            else if (!grid[pos] && mode == PLACING && num_collected_blocks) {
+              // DRY violation w/ below (MOUSEBUTTONDOWN handler)
+              for (int i = 0; i < num_blocks; ++i) {
+                if (blocks[i].flags & DELETED) {
+                  num_collected_blocks--;
+                  blocks[i].flags &= (~DELETED); // clear deleted bit
+                  set_xy(&blocks[i], grid, x, y);
+                  break;
+                }
+              }
+            }
           }
           break;
         case SDL_MOUSEBUTTONDOWN:
@@ -211,15 +230,21 @@ int main(int num_args, char* args[]) {
             int pos = to_pos(x, y);
             if (grid[pos] && (grid[pos]->flags & BLOCK) &&
               !(grid[pos]->flags & STATIC)) {
-                if (selected)
-                  selected->flags &= ~SELECTED;
-                grid[pos]->flags |= SELECTED;
-                selected = grid[pos];
+                mode = PICKING_UP;
+                num_collected_blocks++;
+                grid[pos]->flags |= DELETED;
+                remove_from_grid(grid[pos], grid);
             }
-            else if (!grid[pos] && selected) {
-              selected->flags &= ~SELECTED;
-              move(selected, grid, x, y);
-              selected = NULL;
+            else if (!grid[pos] && num_collected_blocks) {
+              mode = PLACING;
+              for (int i = 0; i < num_blocks; ++i) {
+                if (blocks[i].flags & DELETED) {
+                  num_collected_blocks--;
+                  blocks[i].flags &= (~DELETED); // clear deleted bit
+                  set_xy(&blocks[i], grid, x, y);
+                  break;
+                }
+              }
             }
           }
           break;
@@ -389,6 +414,8 @@ int main(int num_args, char* args[]) {
     }
     
     for (int i = 0; i < num_blocks; ++i) {
+      if (blocks[i].flags & DELETED)
+        continue;
       SDL_Rect r = {
         .x = blocks[i].x * block_w - vp.x,
         .y = blocks[i].y * block_h - vp.y,
@@ -493,7 +520,7 @@ int main(int num_args, char* args[]) {
           .h = block_h
         };
 
-        if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 150) < 0)
+        if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 50) < 0)
           error("setting darkness color");
         if (SDL_RenderFillRect(renderer, &darkness) < 0)
           error("filling darkness rect");
