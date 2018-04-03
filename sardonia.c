@@ -47,6 +47,8 @@ void remove_from_grid(entity* ent, entity* grid[]);
 int to_x(int ix);
 int to_y(int ix);
 int to_pos(int x, int y);
+bool is_in_grid(int x, int y);
+void beast_explode(entity* beast, entity* grid[], byte enclosures[]);
 int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y);
 void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check);
 void toggleFullScreen(SDL_Window *win);
@@ -587,13 +589,10 @@ int main(int num_args, char* args[]) {
         }
 
         // if the beast is surrounded by blocks & has nowhere to move, it blows up
-        if (!found_direction) {
-          beasts[i].flags |= DELETED; // turn deleted bit on
-          remove_from_grid(&beasts[i], grid);
-        }
-        else {
+        if (!found_direction)
+          beast_explode(&beasts[i], grid, enclosures);
+        else
           move(&beasts[i], grid, x, y);
-        }
       }
       last_move_time = SDL_GetTicks();
     }
@@ -605,6 +604,37 @@ int main(int num_args, char* args[]) {
   SDL_DestroyWindow(window);
   SDL_Quit();
   return 0;
+}
+
+void beast_explode(entity* beast, entity* grid[], byte enclosures[]) {
+  int x = beast->x;
+  int y = beast->y;
+
+  beast->flags |= DELETED; // turn deleted bit on
+  remove_from_grid(beast, grid);
+
+  for (int dir_x = -1; dir_x <= 1; ++dir_x) {
+    for (int dir_y = -1; dir_y <= 1; ++dir_y) {
+      // disallow no movement
+      if (!dir_x && !dir_y)
+        continue;
+
+      // check the bounds
+      int new_x = x + dir_x;
+      int new_y = y + dir_y;
+      if (!is_in_grid(new_x, new_y))
+        continue;
+
+      int pos = to_pos(new_x, new_y);
+      if (grid[pos]->flags & BLOCK && !(grid[pos]->flags & STATIC)) {
+        grid[pos]->flags |= DELETED;
+        remove_from_grid(grid[pos], grid);
+      }
+    }
+  }
+
+  // check if previous enclosure was just broken
+  checkForEnclosures(grid, enclosures, x, y, false);
 }
 
 int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y) {
@@ -695,11 +725,18 @@ int to_pos(int x, int y) {
   return pos;
 }
 
-// check all sides of the last pushed block for newly-created enclosures
-void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check) {
+bool is_in_grid(int x, int y) {
   if ((x < 0 || x >= num_blocks_w) ||
     (y < 0 || y >= num_blocks_h))
-      return;
+      return false;
+
+  return true;
+}
+
+// check all sides of the last pushed block for newly-created enclosures
+void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check) {
+  if (!is_in_grid(x, y))
+    return;
 
   // clear the PROCESSED bit from everything before beginning
   for (int i = 0; i < grid_len; ++i)
@@ -710,9 +747,8 @@ void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool ne
       // check the bounds
       int new_x = x + dir_x;
       int new_y = y + dir_y;
-      if ((new_x < 0 || new_x >= num_blocks_w) ||
-        (new_y < 0 || new_y >= num_blocks_h))
-          continue;
+      if (!is_in_grid(new_x, new_y))
+        continue;
 
       int pos = to_pos(new_x, new_y);
       
@@ -771,9 +807,8 @@ bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos) {
       // check the bounds
       int new_x = x + dir_x;
       int new_y = y + dir_y;
-      if ((new_x < 0 || new_x >= num_blocks_w) ||
-        (new_y < 0 || new_y >= num_blocks_h))
-          continue;
+      if (!is_in_grid(new_x, new_y))
+        continue;
 
       int next_pos = to_pos(new_x, new_y);
       if (next_pos == prev_pos)
