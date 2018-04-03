@@ -23,6 +23,7 @@ typedef unsigned char byte;
 
 short mode = PICKING_UP;
 int num_collected_blocks = 0;
+int block_ratio = 3; // you have to collect 3 stones to build 1 wall
 
 typedef struct {
   byte flags;
@@ -55,8 +56,8 @@ int imin(int i, int j);
 bool inBounds(int x, int y);
 void error(char* activity);
 
-int block_w = 25;
-int block_h = 25;
+int block_w = 40;
+int block_h = 40;
 int block_density_pct = 20;
 int starting_distance = 15;
 
@@ -210,11 +211,11 @@ int main(int num_args, char* args[]) {
               grid[pos]->flags |= DELETED;
               remove_from_grid(grid[pos], grid);
             }
-            else if (!grid[pos] && mode == PLACING && num_collected_blocks) {
+            else if (!grid[pos] && mode == PLACING && num_collected_blocks >= block_ratio) {
               // DRY violation w/ below (MOUSEBUTTONDOWN handler)
               for (int i = 0; i < num_blocks; ++i) {
                 if (blocks[i].flags & DELETED) {
-                  num_collected_blocks--;
+                  num_collected_blocks -= block_ratio;
                   blocks[i].flags &= (~DELETED); // clear deleted bit
                   set_xy(&blocks[i], grid, x, y);
                   break;
@@ -235,11 +236,11 @@ int main(int num_args, char* args[]) {
                 grid[pos]->flags |= DELETED;
                 remove_from_grid(grid[pos], grid);
             }
-            else if (!grid[pos] && num_collected_blocks) {
+            else if (!grid[pos] && num_collected_blocks >= block_ratio) {
               mode = PLACING;
               for (int i = 0; i < num_blocks; ++i) {
                 if (blocks[i].flags & DELETED) {
-                  num_collected_blocks--;
+                  num_collected_blocks -= block_ratio;
                   blocks[i].flags &= (~DELETED); // clear deleted bit
                   set_xy(&blocks[i], grid, x, y);
                   break;
@@ -500,7 +501,6 @@ int main(int num_args, char* args[]) {
         (inBounds(x + 1, y - 1) && enclosures[to_pos(x + 1, y - 1)] & ENCLOSED) ||
         (inBounds(x - 1, y + 1) && enclosures[to_pos(x - 1, y + 1)] & ENCLOSED))
         continue;
-      
 
       double dist = -1;
       for (int i = 0; i < num_players; ++i) {
