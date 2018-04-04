@@ -13,7 +13,6 @@ typedef unsigned char byte;
 #define BEAST 0x4
 #define PLAYER 0x8
 #define STATIC 0x10
-#define SELECTED 0x20
 
 #define PROCESSED 0x1
 #define ENCLOSED 0x2
@@ -403,7 +402,9 @@ int main(int num_args, char* args[]) {
       error("setting bg color");
     if (SDL_RenderClear(renderer) < 0)
       error("clearing renderer");
-    
+
+    if (SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255) < 0)
+      error("setting block color");
     for (int i = 0; i < num_blocks; ++i) {
       if (blocks[i].flags & DELETED)
         continue;
@@ -413,14 +414,6 @@ int main(int num_args, char* args[]) {
         .w = block_w,
         .h = block_h
       };
-      if (blocks[i].flags & SELECTED) {
-        if (SDL_SetRenderDrawColor(renderer, 50, 50, 200, 255) < 0)
-          error("setting selected block color");
-      }
-      else {
-        if (SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255) < 0)
-          error("setting block color");
-      }
       if (SDL_RenderFillRect(renderer, &r) < 0)
         error("drawing block");
     }
