@@ -15,15 +15,17 @@ typedef unsigned char byte;
 #define STATIC 0x10
 #define SELECTED 0x20
 
-#define PROCESSED 0x01
-#define ENCLOSED 0x02
+#define PROCESSED 0x1
+#define ENCLOSED 0x2
+#define PROCESSED_BORDER 0x4
+#define ENCLOSED_BORDER 0x8
 
 #define PICKING_UP 0
 #define PLACING 1
 
 short mode = PICKING_UP;
 int num_collected_blocks = 0;
-int block_ratio = 3; // you have to collect 3 stones to build 1 wall
+int block_ratio = 3; // you have to collect 3 rocks to build 1 wall
 
 typedef struct {
   byte flags;
@@ -48,6 +50,7 @@ int to_x(int ix);
 int to_y(int ix);
 int to_pos(int x, int y);
 bool is_in_grid(int x, int y);
+bool is_next_to_wall(entity* beast, entity* grid[], byte enclosures[]);
 void beast_explode(entity* beast, entity* grid[], byte enclosures[]);
 int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y);
 void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check);
@@ -400,21 +403,6 @@ int main(int num_args, char* args[]) {
       error("setting bg color");
     if (SDL_RenderClear(renderer) < 0)
       error("clearing renderer");
-
-    if (SDL_SetRenderDrawColor(renderer, 150, 140, 100, 255) < 0)
-      error("setting enclosed block color");
-    for (int pos = 0; pos < grid_len; ++pos) {
-      if (enclosures[pos] & ENCLOSED) {
-        SDL_Rect r = {
-          .x = to_x(pos) * block_w - vp.x,
-          .y = to_y(pos) * block_h - vp.y,
-          .w = block_w,
-          .h = block_h
-        };
-        if (SDL_RenderFillRect(renderer, &r) < 0)
-          error("drawing enclosed area");
-      }
-    }
     
     for (int i = 0; i < num_blocks; ++i) {
       if (blocks[i].flags & DELETED)
@@ -437,8 +425,40 @@ int main(int num_args, char* args[]) {
         error("drawing block");
     }
 
+    if (SDL_SetRenderDrawColor(renderer, 150, 140, 100, 255) < 0)
+      error("setting enclosed block color");
+    for (int pos = 0; pos < grid_len; ++pos) {
+      if (enclosures[pos] & ENCLOSED) {
+        SDL_Rect r = {
+          .x = to_x(pos) * block_w - vp.x,
+          .y = to_y(pos) * block_h - vp.y,
+          .w = block_w,
+          .h = block_h
+        };
+        if (SDL_RenderFillRect(renderer, &r) < 0)
+          error("drawing enclosed area");
+        if (enclosures[pos] & ENCLOSED_BORDER)
+          printf("Warning: enclosed and enclosed_border: %d, %d\n", to_x(pos), to_y(pos));
+      }
+    }
+
+    if (SDL_SetRenderDrawColor(renderer, 170, 160, 120, 255) < 0)
+      error("setting enclosed border color");
+    for (int pos = 0; pos < grid_len; ++pos) {
+      if (enclosures[pos] & ENCLOSED_BORDER) {
+        SDL_Rect r = {
+          .x = to_x(pos) * block_w - vp.x,
+          .y = to_y(pos) * block_h - vp.y,
+          .w = block_w,
+          .h = block_h
+        };
+        if (SDL_RenderFillRect(renderer, &r) < 0)
+          error("drawing enclosed area");
+      }
+    }
+
     if (SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255) < 0)
-      error("setting block color");
+      error("setting static block color");
 
     for (int i = 0; i < num_static_blocks; ++i) {
       // don't render the border blocks
@@ -534,6 +554,13 @@ int main(int num_args, char* args[]) {
         if (beasts[i].flags & DELETED)
           continue;
 
+        if (is_next_to_wall(&beasts[i], grid, enclosures)) {
+          if (rand() % 10 == 1) {
+            beast_explode(&beasts[i], grid, enclosures);
+            continue;
+          }
+        }
+
         int x = beasts[i].x;
         int y = beasts[i].y;
 
@@ -606,6 +633,23 @@ int main(int num_args, char* args[]) {
   return 0;
 }
 
+bool is_next_to_wall(entity* beast, entity* grid[], byte enclosures[]) {
+  for (int dir_x = -1; dir_x <= 1; ++dir_x) {
+    for (int dir_y = -1; dir_y <= 1; ++dir_y) {
+      // check the bounds
+      int new_x = beast->x + dir_x;
+      int new_y = beast->y + dir_y;
+      if (!is_in_grid(new_x, new_y))
+        continue;
+
+      int pos = to_pos(new_x, new_y);
+      if (enclosures[pos] & ENCLOSED_BORDER)
+        return true;
+    }
+  }
+  return false;
+}
+
 void beast_explode(entity* beast, entity* grid[], byte enclosures[]) {
   int x = beast->x;
   int y = beast->y;
@@ -615,10 +659,6 @@ void beast_explode(entity* beast, entity* grid[], byte enclosures[]) {
 
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
     for (int dir_y = -1; dir_y <= 1; ++dir_y) {
-      // disallow no movement
-      if (!dir_x && !dir_y)
-        continue;
-
       // check the bounds
       int new_x = x + dir_x;
       int new_y = y + dir_y;
@@ -626,12 +666,16 @@ void beast_explode(entity* beast, entity* grid[], byte enclosures[]) {
         continue;
 
       int pos = to_pos(new_x, new_y);
-      if (grid[pos]->flags & BLOCK && !(grid[pos]->flags & STATIC)) {
+      if (grid[pos] && grid[pos]->flags & BLOCK && !(grid[pos]->flags & STATIC)) {
         grid[pos]->flags |= DELETED;
         remove_from_grid(grid[pos], grid);
       }
     }
   }
+
+  // BUG: this only works if the beast was IN the enclosure
+  // not if the beast outside the wall of an enclosure
+  // we can check `enclosures` to know which situation we're in (if either)...
 
   // check if previous enclosure was just broken
   checkForEnclosures(grid, enclosures, x, y, false);
@@ -738,9 +782,11 @@ void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool ne
   if (!is_in_grid(x, y))
     return;
 
-  // clear the PROCESSED bit from everything before beginning
-  for (int i = 0; i < grid_len; ++i)
+  // clear the PROCESSED & PROCESSED_BORDER bits from everything before beginning
+  for (int i = 0; i < grid_len; ++i) {
     enclosures[i] &= (~PROCESSED);
+    enclosures[i] &= (~PROCESSED_BORDER);
+  }
 
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
     for (int dir_y = -1; dir_y <= 1; ++dir_y) {
@@ -761,18 +807,24 @@ void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool ne
         continue;
 
       // clear the processed bits from the last flood-fill
-      for (int i = 0; i < grid_len; ++i)
+      for (int i = 0; i < grid_len; ++i) {
         if (enclosures[i] & PROCESSED)
           enclosures[i] &= (~PROCESSED);
+        if (enclosures[i] & PROCESSED_BORDER)
+          enclosures[i] &= (~PROCESSED_BORDER);
+      }
       
       // everything that can flood-fill is enclosed; mark it as such
       int prev_pos = -1;
       bool is_enclosure = floodFill(grid, enclosures, prev_pos, pos);
 
       if (new_check && is_enclosure) {
-        for (int i = 0; i < grid_len; ++i)
+        for (int i = 0; i < grid_len; ++i) {
           if (enclosures[i] & PROCESSED)
             enclosures[i] |= ENCLOSED;
+          if (enclosures[i] & PROCESSED_BORDER)
+            enclosures[i] |= ENCLOSED_BORDER;
+        }
       }
       else if (!new_check && !is_enclosure && enclosures[pos] & ENCLOSED) {
         floodClear(grid, enclosures, pos);
@@ -789,8 +841,7 @@ void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool ne
 bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos) {
   int x = to_x(pos);
   int y = to_y(pos);
-  //printf("%d, %d\n", x, y);
-
+  
   // we've branched off & hit something already covered by another branch
   if (enclosures[pos] & PROCESSED)
     return true;
@@ -810,6 +861,7 @@ bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos) {
       if (!is_in_grid(new_x, new_y))
         continue;
 
+      // ignore the previous position
       int next_pos = to_pos(new_x, new_y);
       if (next_pos == prev_pos)
         continue;
@@ -817,6 +869,10 @@ bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos) {
       // if we hit one of the edges, then this is *not* enclosed
       if (new_x == 0 || new_y == 0 || new_x == num_blocks_w - 1 || new_y == num_blocks_h - 1)
         return false;
+
+      // mark border of processed area
+      if (grid[next_pos] && grid[next_pos]->flags & BLOCK)
+        enclosures[next_pos] |= PROCESSED_BORDER;
 
       if (!grid[next_pos] || !(grid[next_pos]->flags & BLOCK))
         if (!floodFill(grid, enclosures, pos, next_pos))
@@ -849,6 +905,13 @@ void floodClear(entity* grid[], byte enclosures[], int pos) {
           continue;
 
       int next_pos = to_pos(new_x, new_y);
+      
+      // clear the ENCLOSED_BORDER bit
+      // BUG: if a block was bordering TWO enclosed areas & one cleared,
+      // this will make the game will think it is not an enclosed border
+      if (grid[next_pos] && grid[next_pos]->flags & BLOCK)
+        enclosures[pos] &= (~ENCLOSED_BORDER);
+
       if (!grid[next_pos] || !(grid[next_pos]->flags & BLOCK))
         floodClear(grid, enclosures, next_pos);
     }
