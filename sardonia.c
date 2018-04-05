@@ -727,6 +727,11 @@ int main(int num_args, char* args[]) {
 
         bool found_direction = true;
 
+        // a quarter of the time we want them to move randomly
+        // this keeps them from being too deterministic & from getting stuck
+        // behind walls, etc
+        bool move_randomly = rand() % 100 > 75;
+
         // the beast will "get" the players[0] on this move
         if (abs(players[0].x - x) <= 1 && abs(players[0].y - y) <= 1) {
           is_gameover = true;
@@ -734,18 +739,35 @@ int main(int num_args, char* args[]) {
           y = players[0].y;
         }
         // try to move towards the player, if possible
-        else if (dir_x && dir_y && !grid[to_pos(x + dir_x, y + dir_y)]) {
+        else if (!move_randomly && dir_x && dir_y && !grid[to_pos(x + dir_x, y + dir_y)]) {
           x += dir_x;
           y += dir_y;
         }
-        else if (dir_x && !grid[to_pos(x + dir_x, y)]) {
+        else if (!move_randomly && dir_x && !grid[to_pos(x + dir_x, y)]) {
           x += dir_x;
         }
-        else if (dir_y && !grid[to_pos(x, y + dir_y)]) {
+        else if (!move_randomly && dir_y && !grid[to_pos(x, y + dir_y)]) {
           y += dir_y;
+        }
+        // if there's no delta in one dimension, try +/- 1
+        else if (!move_randomly && !dir_x && !grid[to_pos(x + 1, y + dir_y)]) {
+          x += 1;
+          y += dir_y;
+        }
+        else if (!move_randomly && !dir_x && !grid[to_pos(x - 1, y + dir_y)]) {
+          x -= 1;
+          y += dir_y;
+        }
+        else if (!move_randomly && !dir_y && !grid[to_pos(x + dir_x, y + 1)]) {
+          x += dir_x;
+          y += 1;
+        }
+        else if (!move_randomly && !dir_y && !grid[to_pos(x + dir_x, y - 1)]) {
+          x += dir_x;
+          y -= 1;
         }
         else {
-          // try all other combinations of directions
+          // test all combinations of directions
           found_direction = false;
           for (int mv_x = -1; mv_x <= 1; ++mv_x) {
             if (!found_direction) {
@@ -754,13 +776,53 @@ int main(int num_args, char* args[]) {
                   continue; // 0,0 isn't a real move
 
                 if (!grid[to_pos(x + mv_x, y + mv_y)]) {
-                  x = x + mv_x;
-                  y = y + mv_y;
                   found_direction = true;
                   break;
                 }
               }
             }
+          }
+          if (found_direction) {
+            int mv_x = -1;
+            int mv_y = -1;
+            do {
+              int dir = rand() % 8; // there are 8 possible directions
+
+              if (dir == 0) {
+                mv_x = -1;
+                mv_y = -1;
+              }
+              else if (dir == 1) {
+                mv_x = 0;
+                mv_y = -1;
+              }
+              else if (dir == 2) {
+                mv_x = 1;
+                mv_y = -1;
+              }
+              else if (dir == 3) {
+                mv_x = -1;
+                mv_y = 0;
+              }
+              else if (dir == 4) {
+                mv_x = 1;
+                mv_y = 0;
+              }
+              else if (dir == 5) {
+                mv_x = -1;
+                mv_y = 1;
+              }
+              else if (dir == 6) {
+                mv_x = 0;
+                mv_y = 1;
+              }
+              else { // dir == 7
+                mv_x = 1;
+                mv_y = 1;
+              }
+            } while (grid[to_pos(x + mv_x, y + mv_y)]);
+            x += mv_x;
+            y += mv_y;
           }
         }
 
