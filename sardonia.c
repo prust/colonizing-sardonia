@@ -25,8 +25,8 @@ typedef unsigned char byte;
 
 short mode = PICKING_UP;
 int num_collected_blocks = 0;
-int block_ratio = 3; // you have to collect 3 rocks to build 1 wall
-int num_blocks_per_turret = 6; // collect 3 rocks to build 1 turret
+int block_ratio = 2; // you have to collect 2 rocks to build 1 wall
+int num_blocks_per_turret = 6; // collect 6 rocks to build 1 turret
 
 typedef struct {
   byte flags;
