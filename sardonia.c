@@ -76,6 +76,7 @@ int block_w = 40;
 int block_h = 40;
 int bullet_w = 4;
 int bullet_h = 4;
+double bullet_speed = 300.0; // in px/sec
 int block_density_pct = 20;
 int starting_distance = 15;
 
@@ -104,7 +105,7 @@ int grid_len;
 unsigned int last_move_time = 0;
 int beast_speed = 500; // ms between moves
 unsigned int last_fire_time = 0;
-int turret_fire_interval = 400; // ms between turret firing
+int turret_fire_interval = 2000; // ms between turret firing
 const int num_beasts = 5;
 int max_turrets = 50;
 int max_bullets = 100;
@@ -217,7 +218,12 @@ int main(int num_args, char* args[]) {
   int p1_dir_y = 0;
   int p2_dir_x = 0;
   int p2_dir_y = 0;
+  unsigned int last_loop_time = SDL_GetTicks();
   while (!is_gameover) {
+    unsigned int curr_time = SDL_GetTicks();
+    double dt = (curr_time - last_loop_time) / 1000.0; // dt should always be in seconds
+    last_loop_time = curr_time;
+
     const Uint8 *state = SDL_GetKeyboardState(NULL);
     bool is_spacebar_pressed = state[SDL_SCANCODE_SPACE];
     
@@ -536,9 +542,8 @@ int main(int num_args, char* args[]) {
         continue;
 
       // TODO: move this from drawing to an update fn
-      // TODO: factor in bullet speed & dt
-      bullets[i].x += bullets[i].dx;
-      bullets[i].y += bullets[i].dy;
+      bullets[i].x += bullets[i].dx * bullet_speed * dt;
+      bullets[i].y += bullets[i].dy * bullet_speed * dt;
       // delete bullets that have gone out of the game
       if ((bullets[i].x < 0 || bullets[i].x > num_blocks_w * block_w) ||
         bullets[i].y < 0 || bullets[i].y > num_blocks_h * block_h) {
@@ -557,6 +562,7 @@ int main(int num_args, char* args[]) {
         else if (grid[pos] && grid[pos]->flags & BEAST) {
           grid[pos]->flags |= DELETED;
           remove_from_grid(grid[pos], grid);
+          bullets[i].flags |= DELETED;
         }
       }
       
@@ -645,16 +651,23 @@ int main(int num_args, char* args[]) {
       }
     }
 
-    if (SDL_GetTicks() - last_fire_time >= turret_fire_interval) {
+    if (curr_time - last_fire_time >= turret_fire_interval) {
       for (int i = 0; i < max_turrets; ++i) {
         entity* turret = &turrets[i];
         if (turret->flags & DELETED)
           continue;
 
+        // only turrets that are part of an enclosure can fire
+        int pos = to_pos(turret->x, turret->y);
+        if (!(enclosures[pos] & ENCLOSED_BORDER))
+          continue;
+
         entity* beast = closest_entity(turret->x, turret->y, beasts, num_beasts);
         if (beast) {
-          int dx = beast->x - turret->x;
-          int dy = beast->y - turret->y;
+          double dist = calc_dist(beast->x, beast->y, turret->x, turret->y);
+          // dividing by the distance gives us a normalized 1-unit vector
+          double dx = (beast->x - turret->x) / dist;
+          double dy = (beast->y - turret->y) / dist;
           for (int j = 0; j < max_bullets; ++j) {
             bullet* b = &bullets[j];
             if (b->flags & DELETED) {
@@ -665,8 +678,13 @@ int main(int num_args, char* args[]) {
               int start_y = turret->y * block_h;
               if (dx > 0)
                 start_x += block_w;
+              else
+                start_x -= 1; // so it's not on top of itself
               if (dy > 0)
                 start_y += block_h;
+              else
+                start_y -= 1; // so it's not on top of itself
+
               b->x = start_x;
               b->y = start_y;
               b->dx = dx;
@@ -677,10 +695,10 @@ int main(int num_args, char* args[]) {
         }
         // TODO: determine when max_bullets is exceeded & notify player?
       }
-      last_fire_time = SDL_GetTicks();
+      last_fire_time = curr_time;
     }
 
-    if (SDL_GetTicks() - last_move_time >= beast_speed) {
+    if (curr_time - last_move_time >= beast_speed) {
       for (int i = 0; i < num_beasts; ++i) {
         if (beasts[i].flags & DELETED)
           continue;
@@ -752,7 +770,7 @@ int main(int num_args, char* args[]) {
         else
           move(&beasts[i], grid, x, y);
       }
-      last_move_time = SDL_GetTicks();
+      last_move_time = curr_time;
     }
     
     SDL_RenderPresent(renderer);
