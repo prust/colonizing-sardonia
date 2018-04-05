@@ -13,6 +13,7 @@ typedef unsigned char byte;
 #define BEAST 0x4
 #define PLAYER 0x8
 #define STATIC 0x10
+#define TURRET 0x20
 
 #define PROCESSED 0x1
 #define ENCLOSED 0x2
@@ -25,6 +26,7 @@ typedef unsigned char byte;
 short mode = PICKING_UP;
 int num_collected_blocks = 0;
 int block_ratio = 3; // you have to collect 3 rocks to build 1 wall
+int num_blocks_per_turret = 6; // collect 3 rocks to build 1 turret
 
 typedef struct {
   byte flags;
@@ -90,6 +92,7 @@ int grid_len;
 unsigned int last_move_time = 0;
 int beast_speed = 500; // ms between moves
 const int num_beasts = 5;
+int max_turrets = 50;
 
 int main(int num_args, char* args[]) {
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
@@ -169,6 +172,11 @@ int main(int num_args, char* args[]) {
     grid[pos] = &beasts[i];
   }
 
+  // precreate all turrets "blocks" as deleted
+  entity turrets[max_turrets];
+  for (int i = 0; i < max_turrets; ++i)
+    turrets[i].flags = BLOCK | TURRET | DELETED;
+
   SDL_Window *window;
   window = SDL_CreateWindow("Beast", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, num_blocks_w * block_w, num_blocks_h * block_h, SDL_WINDOW_RESIZABLE);
   if (!window)
@@ -247,6 +255,21 @@ int main(int num_args, char* args[]) {
                   num_collected_blocks -= block_ratio;
                   blocks[i].flags &= (~DELETED); // clear deleted bit
                   set_xy(&blocks[i], grid, x, y);
+                  break;
+                }
+              }
+            }
+          }
+          else if (evt.button.button == SDL_BUTTON_RIGHT) {
+            int x = (evt.button.x + vp.x) / block_w;
+            int y = (evt.button.y + vp.y) / block_h;
+            int pos = to_pos(x, y);
+            if (!grid[pos] && num_collected_blocks >= num_blocks_per_turret) {
+              for (int i = 0; i < max_turrets; ++i) {
+                if (turrets[i].flags & DELETED) {
+                  num_collected_blocks -= num_blocks_per_turret;
+                  turrets[i].flags &= (~DELETED); // clear deleted bit
+                  set_xy(&turrets[i], grid, x, y);
                   break;
                 }
               }
@@ -467,6 +490,22 @@ int main(int num_args, char* args[]) {
       };
       if (SDL_RenderFillRect(renderer, &r) < 0)
         error("drawing block");
+    }
+
+    if (SDL_SetRenderDrawColor(renderer, 170, 230, 240, 255) < 0)
+      error("setting turret color");
+    for (int i = 0; i < max_turrets; ++i) {
+      if (turrets[i].flags & DELETED)
+        continue;
+
+      SDL_Rect turret_rect = {
+        .x = turrets[i].x * block_w - vp.x,
+        .y = turrets[i].y * block_h - vp.y,
+        .w = block_w,
+        .h = block_h
+      };
+      if (SDL_RenderFillRect(renderer, &turret_rect) < 0)
+        error("filling rect");
     }
 
     if (SDL_SetRenderDrawColor(renderer, 140, 60, 140, 255) < 0)
