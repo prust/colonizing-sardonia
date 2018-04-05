@@ -41,6 +41,14 @@ typedef struct {
   int h;
 } viewport;
 
+typedef struct {
+  byte flags;
+  double x;
+  double y;
+  double dx;
+  double dy;
+} bullet;
+
 // forward-declare functions
 int findAvailPos(entity* grid[]);
 void move(entity* ent, entity* grid[], int x, int y);
@@ -64,6 +72,8 @@ void error(char* activity);
 
 int block_w = 40;
 int block_h = 40;
+int bullet_w = 2;
+int bullet_h = 2;
 int block_density_pct = 20;
 int starting_distance = 15;
 
@@ -91,8 +101,11 @@ int grid_len;
 
 unsigned int last_move_time = 0;
 int beast_speed = 500; // ms between moves
+unsigned int last_fire_time = 0;
+int turret_fire_interval = 400; // ms between turret firing
 const int num_beasts = 5;
 int max_turrets = 50;
+int max_bullets = 100;
 
 int main(int num_args, char* args[]) {
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
@@ -176,6 +189,10 @@ int main(int num_args, char* args[]) {
   entity turrets[max_turrets];
   for (int i = 0; i < max_turrets; ++i)
     turrets[i].flags = BLOCK | TURRET | DELETED;
+
+  bullet bullets[max_bullets];
+  for (int i = 0; i < max_bullets; ++i)
+    bullets[i].flags = DELETED;
 
   SDL_Window *window;
   window = SDL_CreateWindow("Beast", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, num_blocks_w * block_w, num_blocks_h * block_h, SDL_WINDOW_RESIZABLE);
@@ -273,6 +290,8 @@ int main(int num_args, char* args[]) {
                   break;
                 }
               }
+              // TODO: how do we determine if max_turrets has been reached
+              // and alert the player?
             }
           }
           break;
@@ -508,6 +527,49 @@ int main(int num_args, char* args[]) {
         error("filling rect");
     }
 
+    if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255) < 0)
+      error("setting bullet color");
+    for (int i = 0; i < max_bullets; ++i) {
+      if (bullets[i].flags & DELETED)
+        continue;
+
+      // TODO: move this from drawing to an update fn
+      // TODO: factor in bullet speed & dt
+      bullets[i].x += bullets[i].dx * 5;
+      bullets[i].y += bullets[i].dy * 5;
+      // delete bullets that have gone out of the game
+      if ((bullets[i].x < 0 || bullets[i].x > num_blocks_w * block_w) ||
+        bullets[i].y < 0 || bullets[i].y > num_blocks_h * block_h) {
+          bullets[i].flags |= DELETED; // set deleted bit on
+          continue;
+      }
+
+      int grid_x = bullets[i].x / block_w;
+      int grid_y = bullets[i].y / block_h;
+      if (is_in_grid(grid_x, grid_y)) {
+        int pos = to_pos(grid_x, grid_y);
+        if (grid[pos] && grid[pos]->flags & BLOCK) {
+          bullets[i].flags |= DELETED;
+          continue;
+        }
+        else if (grid[pos] && grid[pos]->flags & BEAST) {
+          grid[pos]->flags |= DELETED;
+          remove_from_grid(grid[pos], grid);
+        }
+      }
+      
+      int x = bullets[i].x - vp.x;
+      int y = bullets[i].y - vp.y;
+      SDL_Rect bullet_rect = {
+        .x = x,
+        .y = y,
+        .w = bullet_w,
+        .h = bullet_h
+      };
+      if (SDL_RenderFillRect(renderer, &bullet_rect) < 0)
+        error("filling rect");
+    }
+
     if (SDL_SetRenderDrawColor(renderer, 140, 60, 140, 255) < 0)
       error("setting player color");
     for (int i = 0; i < num_players; ++i) {
@@ -579,6 +641,30 @@ int main(int num_args, char* args[]) {
         if (SDL_RenderFillRect(renderer, &darkness) < 0)
           error("filling darkness rect");
       }
+    }
+
+    if (SDL_GetTicks() - last_fire_time >= turret_fire_interval) {
+      for (int i = 0; i < max_turrets; ++i) {
+        entity* turret = &turrets[i];
+        if (turret->flags & DELETED)
+          continue;
+
+        for (int j = 0; j < max_bullets; ++j) {
+          bullet* b = &bullets[j];
+          if (b->flags & DELETED) {
+            b->flags &= (~DELETED); // clear the DELETED bit
+            // start in center of turret
+            // TODO: move out based on the direction
+            b->x = turret->x * block_w + 0.5 * block_w;
+            b->y = turret->y * block_h + 1;//0.5 * block_h;
+            b->dx = 0.0;
+            b->dy = -1.0;
+            break;
+          }
+        }
+        // TODO: determine when max_bullets is exceeded & notify player?
+      }
+      last_fire_time = SDL_GetTicks();
     }
 
     if (SDL_GetTicks() - last_move_time >= beast_speed) {
