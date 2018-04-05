@@ -61,6 +61,7 @@ int to_pos(int x, int y);
 bool is_in_grid(int x, int y);
 bool is_next_to_wall(entity* beast, entity* grid[], byte enclosures[]);
 void beast_explode(entity* beast, entity* grid[], byte enclosures[]);
+entity* closest_entity(int x, int y, entity entities[], int num_entities);
 int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y);
 void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check);
 void toggleFullScreen(SDL_Window *win);
@@ -68,12 +69,13 @@ bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos);
 void floodClear(entity* grid[], byte enclosures[], int pos);
 int imin(int i, int j);
 bool inBounds(int x, int y);
+double calc_dist(int x1, int y1, int x2, int y2);
 void error(char* activity);
 
 int block_w = 40;
 int block_h = 40;
-int bullet_w = 2;
-int bullet_h = 2;
+int bullet_w = 4;
+int bullet_h = 4;
 int block_density_pct = 20;
 int starting_distance = 15;
 
@@ -535,8 +537,8 @@ int main(int num_args, char* args[]) {
 
       // TODO: move this from drawing to an update fn
       // TODO: factor in bullet speed & dt
-      bullets[i].x += bullets[i].dx * 5;
-      bullets[i].y += bullets[i].dy * 5;
+      bullets[i].x += bullets[i].dx;
+      bullets[i].y += bullets[i].dy;
       // delete bullets that have gone out of the game
       if ((bullets[i].x < 0 || bullets[i].x > num_blocks_w * block_w) ||
         bullets[i].y < 0 || bullets[i].y > num_blocks_h * block_h) {
@@ -623,7 +625,7 @@ int main(int num_args, char* args[]) {
         if (players[i].flags & DELETED)
           continue;
 
-        double player_dist = sqrt(pow(players[i].x - x, 2) + pow(players[i].y - y, 2));
+        double player_dist = calc_dist(x, y, players[i].x, players[i].y);
         if (dist == -1 || player_dist < dist)
           dist = player_dist;
       }
@@ -649,17 +651,28 @@ int main(int num_args, char* args[]) {
         if (turret->flags & DELETED)
           continue;
 
-        for (int j = 0; j < max_bullets; ++j) {
-          bullet* b = &bullets[j];
-          if (b->flags & DELETED) {
-            b->flags &= (~DELETED); // clear the DELETED bit
-            // start in center of turret
-            // TODO: move out based on the direction
-            b->x = turret->x * block_w + 0.5 * block_w;
-            b->y = turret->y * block_h + 1;//0.5 * block_h;
-            b->dx = 0.0;
-            b->dy = -1.0;
-            break;
+        entity* beast = closest_entity(turret->x, turret->y, beasts, num_beasts);
+        if (beast) {
+          int dx = beast->x - turret->x;
+          int dy = beast->y - turret->y;
+          for (int j = 0; j < max_bullets; ++j) {
+            bullet* b = &bullets[j];
+            if (b->flags & DELETED) {
+              b->flags &= (~DELETED); // clear the DELETED bit
+              
+              // start in top/left corner
+              int start_x = turret->x * block_w;
+              int start_y = turret->y * block_h;
+              if (dx > 0)
+                start_x += block_w;
+              if (dy > 0)
+                start_y += block_h;
+              b->x = start_x;
+              b->y = start_y;
+              b->dx = dx;
+              b->dy = dy;
+              break;
+            }
           }
         }
         // TODO: determine when max_bullets is exceeded & notify player?
@@ -895,6 +908,23 @@ bool is_in_grid(int x, int y) {
   return true;
 }
 
+entity* closest_entity(int x, int y, entity entities[], int num_entities) {
+  entity* winner = NULL;
+  double winner_dist = -1;
+  
+  for (int i = 0; i < num_entities; ++i) {
+    if (entities[i].flags & DELETED)
+      continue;
+
+    double dist = calc_dist(x, y, entities[i].x, entities[i].y);
+    if (winner_dist == -1 || dist < winner_dist) {
+      winner = &entities[i];
+      winner_dist = dist;
+    }
+  }
+  return winner;
+}
+
 // check all sides of the last pushed block for newly-created enclosures
 void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check) {
   if (!is_in_grid(x, y))
@@ -1057,6 +1087,10 @@ int imin(int i, int j) {
 bool inBounds(int x, int y) {
   return x >= 0 && x < num_blocks_w &&
     y >= 0 && y < num_blocks_h;
+}
+
+double calc_dist(int x1, int y1, int x2, int y2) {
+  return sqrt(pow(x1 - x2, 2) + pow(y1 - y2, 2));
 }
 
 void error(char* activity) {
