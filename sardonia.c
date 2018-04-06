@@ -15,6 +15,7 @@ typedef unsigned char byte;
 #define STATIC 0x10
 #define TURRET 0x20
 #define BORDER 0x40
+#define SUPER 0x80
 
 #define PROCESSED 0x1
 #define ENCLOSED 0x2
@@ -25,8 +26,9 @@ typedef unsigned char byte;
 
 short mode = PICKING_UP;
 int num_collected_blocks = 0;
-int block_ratio = 2; // you have to collect 2 rocks to build 1 wall
+int block_ratio = 1; // you have to collect 2 rocks to build 1 wall
 int num_blocks_per_turret = 6; // collect 6 rocks to build 1 turret
+int attack_dist = 30; // how close a beast has to be before he moves towards you
 
 typedef struct {
   byte flags;
@@ -107,7 +109,7 @@ unsigned int last_move_time = 0;
 int beast_speed = 500; // ms between moves
 unsigned int last_fire_time = 0;
 int turret_fire_interval = 2000; // ms between turret firing
-const int num_beasts = 5;
+const int num_beasts = 10;
 int max_turrets = 50;
 int max_bullets = 100;
 
@@ -184,6 +186,9 @@ int main(int num_args, char* args[]) {
     } while (abs(players[0].x - to_x(pos)) < starting_distance && abs(players[0].y - to_y(pos)) < starting_distance);
 
     beasts[i].flags = BEAST;
+    if (i == 0)
+      beasts[i].flags |= SUPER;
+
     beasts[i].x = to_x(pos);
     beasts[i].y = to_y(pos);
     grid[pos] = &beasts[i];
@@ -530,12 +535,14 @@ int main(int num_args, char* args[]) {
       int grid_y = bullets[i].y / block_h;
       if (is_in_grid(grid_x, grid_y)) {
         int pos = to_pos(grid_x, grid_y);
-        if (grid[pos] && grid[pos]->flags & BLOCK) {
+        entity* ent = grid[pos];
+        if (ent && ent->flags & BLOCK) {
           bullets[i].flags |= DELETED;
           continue;
         }
-        else if (grid[pos] && grid[pos]->flags & BEAST) {
-          del_entity(grid[pos], grid);
+        else if (ent && ent->flags & BEAST) {
+          if (!(ent->flags & SUPER))
+            del_entity(ent, grid);
           bullets[i].flags |= DELETED;
         }
       }
@@ -568,11 +575,18 @@ int main(int num_args, char* args[]) {
         error("filling rect");
     }
 
-    if (SDL_SetRenderDrawColor(renderer, 140, 60, 60, 255) < 0)
-      error("setting beast color");
     for (int i = 0; i < num_beasts; ++i) {
       if (beasts[i].flags & DELETED)
         continue;
+
+      if (beasts[i].flags & SUPER) {
+        if (SDL_SetRenderDrawColor(renderer, 225, 30, 30, 255) < 0)
+          error("setting super beast color");
+      }
+      else {
+        if (SDL_SetRenderDrawColor(renderer, 140, 60, 60, 255) < 0)
+          error("setting beast color");
+      }
 
       SDL_Rect beast_rect = {
         .x = beasts[i].x * block_w - vp.x,
@@ -678,7 +692,7 @@ int main(int num_args, char* args[]) {
           continue;
 
         if (is_next_to_wall(&beasts[i], grid, enclosures)) {
-          if (rand() % 10 == 1) {
+          if (beasts[i].flags & SUPER) {
             beast_explode(&beasts[i], grid, enclosures);
             continue;
           }
@@ -705,6 +719,11 @@ int main(int num_args, char* args[]) {
         // this keeps them from being too deterministic & from getting stuck
         // behind walls, etc
         bool move_randomly = rand() % 100 > 75;
+
+        // if the beast isn't within the attack distance, it should move randomly
+        double dist = calc_dist(players[0].x, players[0].y, beasts[i].x, beasts[i].y);
+        if (dist > attack_dist)
+          move_randomly = true;
 
         // the beast will "get" the players[0] on this move
         if (abs(players[0].x - x) <= 1 && abs(players[0].y - y) <= 1) {
@@ -839,7 +858,8 @@ void beast_explode(entity* beast, entity* grid[], byte enclosures[]) {
   int x = beast->x;
   int y = beast->y;
 
-  del_entity(beast, grid);
+  if (!(beast->flags & SUPER))
+    del_entity(beast, grid);
 
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
     for (int dir_y = -1; dir_y <= 1; ++dir_y) {
