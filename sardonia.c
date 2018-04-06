@@ -30,11 +30,11 @@ int num_collected_blocks = 0;
 int block_ratio = 1; // you have to collect 2 rocks to build 1 wall
 int num_blocks_per_turret = 6; // collect 6 rocks to build 1 turret
 int attack_dist = 30; // how close a beast has to be before he moves towards you
-int beast_health = 3;
+byte beast_health = 3;
 
 typedef struct {
   byte flags;
-  short health;
+  byte health;
   int x;
   int y;
 } entity;
@@ -1056,15 +1056,20 @@ void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool ne
       bool is_enclosure = floodFill(grid, enclosures, prev_pos, pos);
 
       if (new_check && is_enclosure) {
+        int size = 0;
         bool is_powered = false;
         for (int i = 0; i < grid_len; ++i) {
-          if (enclosures[i] & PROCESSED)
+          if (enclosures[i] & PROCESSED) {
             enclosures[i] |= ENCLOSED;
+            size++;
+          }
           if ((enclosures[i] & PROCESSED_BORDER) && grid[i])
             grid[i]->flags |= BORDER;
           if (enclosures[i] & POWERED)
             is_powered = true;
         }
+
+        // TODO: assign fortress FKs and set fortress.size
 
         if (is_powered)
           for (int i = 0; i < grid_len; ++i)
