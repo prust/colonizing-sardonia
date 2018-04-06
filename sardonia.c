@@ -20,6 +20,7 @@ typedef unsigned char byte;
 #define PROCESSED 0x1
 #define ENCLOSED 0x2
 #define PROCESSED_BORDER 0x4
+#define POWERED 0x8
 
 #define PICKING_UP 0
 #define PLACING 1
@@ -29,9 +30,11 @@ int num_collected_blocks = 0;
 int block_ratio = 1; // you have to collect 2 rocks to build 1 wall
 int num_blocks_per_turret = 6; // collect 6 rocks to build 1 turret
 int attack_dist = 30; // how close a beast has to be before he moves towards you
+int beast_health = 3;
 
 typedef struct {
   byte flags;
+  short health;
   int x;
   int y;
 } entity;
@@ -127,7 +130,7 @@ int main(int num_args, char* args[]) {
     enclosures[i] = 0;
   }
 
-  int num_static_blocks = num_blocks_w * 2 + (num_blocks_h - 2) * 2 + 50;
+  int num_static_blocks = num_blocks_w * 2 + (num_blocks_h - 2) * 2 + 10;
   entity static_blocks[num_static_blocks];
   int ix = 0;
   for (int x = 0; x < num_blocks_w; ++x) {
@@ -191,6 +194,7 @@ int main(int num_args, char* args[]) {
 
     beasts[i].x = to_x(pos);
     beasts[i].y = to_y(pos);
+    beasts[i].health = beast_health;
     grid[pos] = &beasts[i];
   }
 
@@ -541,8 +545,12 @@ int main(int num_args, char* args[]) {
           continue;
         }
         else if (ent && ent->flags & BEAST) {
-          if (!(ent->flags & SUPER))
-            del_entity(ent, grid);
+          // if it's a super bullet or NOT a super-beast, "kill the beast!"
+          if (bullets[i].flags & SUPER || !(ent->flags & SUPER)) {
+            ent->health--;
+            if (!ent->health)
+              del_entity(ent, grid);
+          }
           bullets[i].flags |= DELETED;
         }
       }
@@ -660,6 +668,10 @@ int main(int num_args, char* args[]) {
             bullet* b = &bullets[j];
             if (b->flags & DELETED) {
               b->flags &= (~DELETED); // clear the DELETED bit
+
+              // super turrets make super bullets
+              if (turret->flags & SUPER)
+                b->flags |= SUPER;
               
               // start in top/left corner
               int start_x = turret->x * block_w;
@@ -692,7 +704,7 @@ int main(int num_args, char* args[]) {
           continue;
 
         if (is_next_to_wall(&beasts[i], grid, enclosures)) {
-          if (beasts[i].flags & SUPER) {
+          if (beasts[i].flags & SUPER || rand() % 100 >= 98) {
             beast_explode(&beasts[i], grid, enclosures);
             continue;
           }
@@ -1011,6 +1023,7 @@ void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool ne
   for (int i = 0; i < grid_len; ++i) {
     enclosures[i] &= (~PROCESSED);
     enclosures[i] &= (~PROCESSED_BORDER);
+    enclosures[i] &= (~POWERED);
   }
 
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
@@ -1033,10 +1046,9 @@ void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool ne
 
       // clear the processed bits from the last flood-fill
       for (int i = 0; i < grid_len; ++i) {
-        if (enclosures[i] & PROCESSED)
-          enclosures[i] &= (~PROCESSED);
-        if (enclosures[i] & PROCESSED_BORDER)
-          enclosures[i] &= (~PROCESSED_BORDER);
+        enclosures[i] &= (~PROCESSED);
+        enclosures[i] &= (~PROCESSED_BORDER);
+        enclosures[i] &= (~POWERED);
       }
       
       // everything that can flood-fill is enclosed; mark it as such
@@ -1044,12 +1056,20 @@ void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool ne
       bool is_enclosure = floodFill(grid, enclosures, prev_pos, pos);
 
       if (new_check && is_enclosure) {
+        bool is_powered = false;
         for (int i = 0; i < grid_len; ++i) {
           if (enclosures[i] & PROCESSED)
             enclosures[i] |= ENCLOSED;
           if ((enclosures[i] & PROCESSED_BORDER) && grid[i])
             grid[i]->flags |= BORDER;
+          if (enclosures[i] & POWERED)
+            is_powered = true;
         }
+
+        if (is_powered)
+          for (int i = 0; i < grid_len; ++i)
+            if ((enclosures[i] & PROCESSED_BORDER) && grid[i])
+              grid[i]->flags |= SUPER; // super block = power stone
       }
       else if (!new_check && !is_enclosure && enclosures[pos] & ENCLOSED) {
         floodClear(grid, enclosures, pos);
@@ -1096,8 +1116,11 @@ bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos) {
         return false;
 
       // mark border of processed area
-      if (grid[next_pos] && grid[next_pos]->flags & BLOCK)
+      if (grid[next_pos] && grid[next_pos]->flags & BLOCK) {
         enclosures[next_pos] |= PROCESSED_BORDER;
+        if (grid[next_pos]->flags & STATIC)
+          enclosures[next_pos] |= POWERED;
+      }
 
       if (!grid[next_pos] || !(grid[next_pos]->flags & BLOCK))
         if (!floodFill(grid, enclosures, pos, next_pos))
