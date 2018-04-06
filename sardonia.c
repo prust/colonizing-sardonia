@@ -14,11 +14,11 @@ typedef unsigned char byte;
 #define PLAYER 0x8
 #define STATIC 0x10
 #define TURRET 0x20
+#define BORDER 0x40
 
 #define PROCESSED 0x1
 #define ENCLOSED 0x2
 #define PROCESSED_BORDER 0x4
-#define ENCLOSED_BORDER 0x8
 
 #define PICKING_UP 0
 #define PLACING 1
@@ -453,11 +453,19 @@ int main(int num_args, char* args[]) {
     if (SDL_RenderClear(renderer) < 0)
       error("clearing renderer");
 
-    if (SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255) < 0)
-      error("setting block color");
     for (int i = 0; i < num_blocks; ++i) {
       if (blocks[i].flags & DELETED)
         continue;
+
+      if (blocks[i].flags & BORDER) {
+        if (SDL_SetRenderDrawColor(renderer, 170, 160, 120, 255) < 0)
+          error("setting enclosed border color");
+      }
+      else {
+        if (SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255) < 0)
+          error("setting block color");
+      }
+
       SDL_Rect r = {
         .x = blocks[i].x * block_w - vp.x,
         .y = blocks[i].y * block_h - vp.y,
@@ -466,38 +474,6 @@ int main(int num_args, char* args[]) {
       };
       if (SDL_RenderFillRect(renderer, &r) < 0)
         error("drawing block");
-    }
-
-    if (SDL_SetRenderDrawColor(renderer, 150, 140, 100, 255) < 0)
-      error("setting enclosed block color");
-    for (int pos = 0; pos < grid_len; ++pos) {
-      if (enclosures[pos] & ENCLOSED) {
-        SDL_Rect r = {
-          .x = to_x(pos) * block_w - vp.x,
-          .y = to_y(pos) * block_h - vp.y,
-          .w = block_w,
-          .h = block_h
-        };
-        if (SDL_RenderFillRect(renderer, &r) < 0)
-          error("drawing enclosed area");
-        if (enclosures[pos] & ENCLOSED_BORDER)
-          printf("Warning: enclosed and enclosed_border: %d, %d\n", to_x(pos), to_y(pos));
-      }
-    }
-
-    if (SDL_SetRenderDrawColor(renderer, 170, 160, 120, 255) < 0)
-      error("setting enclosed border color");
-    for (int pos = 0; pos < grid_len; ++pos) {
-      if (enclosures[pos] & ENCLOSED_BORDER) {
-        SDL_Rect r = {
-          .x = to_x(pos) * block_w - vp.x,
-          .y = to_y(pos) * block_h - vp.y,
-          .w = block_w,
-          .h = block_h
-        };
-        if (SDL_RenderFillRect(renderer, &r) < 0)
-          error("drawing enclosed area");
-      }
     }
 
     if (SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255) < 0)
@@ -659,7 +635,7 @@ int main(int num_args, char* args[]) {
 
         // only turrets that are part of an enclosure can fire
         int pos = to_pos(turret->x, turret->y);
-        if (!(enclosures[pos] & ENCLOSED_BORDER))
+        if (!(turret->flags & BORDER))
           continue;
 
         entity* beast = closest_entity(turret->x, turret->y, beasts, num_beasts);
@@ -854,7 +830,7 @@ bool is_next_to_wall(entity* beast, entity* grid[], byte enclosures[]) {
         continue;
 
       int pos = to_pos(new_x, new_y);
-      if (enclosures[pos] & ENCLOSED_BORDER)
+      if (grid[pos] && grid[pos]->flags & BORDER)
         return true;
     }
   }
@@ -1050,8 +1026,8 @@ void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool ne
         for (int i = 0; i < grid_len; ++i) {
           if (enclosures[i] & PROCESSED)
             enclosures[i] |= ENCLOSED;
-          if (enclosures[i] & PROCESSED_BORDER)
-            enclosures[i] |= ENCLOSED_BORDER;
+          if ((enclosures[i] & PROCESSED_BORDER) && grid[i])
+            grid[i]->flags |= BORDER;
         }
       }
       else if (!new_check && !is_enclosure && enclosures[pos] & ENCLOSED) {
@@ -1134,11 +1110,11 @@ void floodClear(entity* grid[], byte enclosures[], int pos) {
 
       int next_pos = to_pos(new_x, new_y);
       
-      // clear the ENCLOSED_BORDER bit
+      // clear the BORDER bit
       // BUG: if a block was bordering TWO enclosed areas & one cleared,
       // this will make the game will think it is not an enclosed border
       if (grid[next_pos] && grid[next_pos]->flags & BLOCK)
-        enclosures[pos] &= (~ENCLOSED_BORDER);
+        grid[next_pos]->flags &= (~BORDER);
 
       if (!grid[next_pos] || !(grid[next_pos]->flags & BLOCK))
         floodClear(grid, enclosures, next_pos);
