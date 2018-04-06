@@ -62,6 +62,7 @@ bool is_in_grid(int x, int y);
 bool is_next_to_wall(entity* beast, entity* grid[], byte enclosures[]);
 void beast_explode(entity* beast, entity* grid[], byte enclosures[]);
 entity* closest_entity(int x, int y, entity entities[], int num_entities);
+void del_entity(entity* ent, entity* grid[]);
 int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y);
 void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check);
 void toggleFullScreen(SDL_Window *win);
@@ -245,8 +246,7 @@ int main(int num_args, char* args[]) {
             if (grid[pos] && mode == PICKING_UP && grid[pos]->flags & BLOCK && !(grid[pos]->flags & STATIC)) {
               // DRY violation w/ below (MOUSEBUTTONDOWN handler)
               num_collected_blocks++;
-              grid[pos]->flags |= DELETED;
-              remove_from_grid(grid[pos], grid);
+              del_entity(grid[pos], grid);
             }
             else if (!grid[pos] && mode == PLACING && num_collected_blocks >= block_ratio) {
               // DRY violation w/ below (MOUSEBUTTONDOWN handler)
@@ -270,8 +270,7 @@ int main(int num_args, char* args[]) {
               !(grid[pos]->flags & STATIC)) {
                 mode = PICKING_UP;
                 num_collected_blocks++;
-                grid[pos]->flags |= DELETED;
-                remove_from_grid(grid[pos], grid);
+                del_entity(grid[pos], grid);
             }
             else if (!grid[pos] && num_collected_blocks >= block_ratio) {
               mode = PLACING;
@@ -536,8 +535,7 @@ int main(int num_args, char* args[]) {
           continue;
         }
         else if (grid[pos] && grid[pos]->flags & BEAST) {
-          grid[pos]->flags |= DELETED;
-          remove_from_grid(grid[pos], grid);
+          del_entity(grid[pos], grid);
           bullets[i].flags |= DELETED;
         }
       }
@@ -841,8 +839,7 @@ void beast_explode(entity* beast, entity* grid[], byte enclosures[]) {
   int x = beast->x;
   int y = beast->y;
 
-  beast->flags |= DELETED; // turn deleted bit on
-  remove_from_grid(beast, grid);
+  del_entity(beast, grid);
 
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
     for (int dir_y = -1; dir_y <= 1; ++dir_y) {
@@ -853,10 +850,9 @@ void beast_explode(entity* beast, entity* grid[], byte enclosures[]) {
         continue;
 
       int pos = to_pos(new_x, new_y);
-      if (grid[pos] && grid[pos]->flags & BLOCK && !(grid[pos]->flags & STATIC)) {
-        grid[pos]->flags |= DELETED;
-        remove_from_grid(grid[pos], grid);
-      }
+      entity* ent = grid[pos];
+      if (ent && ent->flags & BLOCK && !(ent->flags & STATIC))
+        del_entity(ent, grid);
     }
   }
 
@@ -866,6 +862,12 @@ void beast_explode(entity* beast, entity* grid[], byte enclosures[]) {
 
   // check if previous enclosure was just broken
   checkForEnclosures(grid, enclosures, x, y, false);
+}
+
+void del_entity(entity* ent, entity* grid[]) {
+  ent->flags |= DELETED; // flip DELETED bit on
+  ent->flags &= (~BORDER); // clear BORDER flag since the block will be re-used
+  remove_from_grid(ent, grid);
 }
 
 int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y) {
@@ -894,8 +896,7 @@ int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y) {
     // if there's a block on the other side, squish beast between blocks
     entity* third_ent = grid[to_pos(pos_x + dir_x*3, pos_y + dir_y*3)];
     if (third_ent && third_ent->flags & BLOCK) {
-      second_ent->flags |= DELETED; // turn deleted bit on
-      remove_from_grid(second_ent, grid);
+      del_entity(second_ent, grid);
       num_blocks_pushed = 0;
     }
     else {
