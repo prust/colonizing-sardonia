@@ -5,6 +5,7 @@
 #include <math.h>
 
 #include "SDL.h"
+#include "font8x8_basic.h"
 
 typedef unsigned char byte;
 
@@ -78,6 +79,7 @@ void floodClear(entity* grid[], byte enclosures[], int pos);
 int imin(int i, int j);
 bool inBounds(int x, int y);
 double calc_dist(int x1, int y1, int x2, int y2);
+int renderText(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size);
 void error(char* activity);
 
 int block_w = 40;
@@ -609,6 +611,24 @@ int main(int num_args, char* args[]) {
       if (SDL_RenderFillRect(renderer, &beast_rect) < 0)
         error("filling beast rect");
     }
+
+    // header
+    int text_px_size = 2;
+    if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255) < 0)
+      error("setting header color");
+    SDL_Rect beast_rect = {
+      .x = 0,
+      .y = 0,
+      .w = vp.w,
+      .h = text_px_size * 8 + 4
+    };
+    if (SDL_RenderFillRect(renderer, &beast_rect) < 0)
+      error("filling beast rect");
+
+    if (SDL_SetRenderDrawColor(renderer, 140, 60, 60, 255) < 0)
+      error("setting header text color");
+    int x_pos = renderText(renderer, "Hello World!", 2, 2, text_px_size);
+    renderText(renderer, ":-)", 2 + x_pos, 2, text_px_size);
 
     // draw darkness
     // if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 50) < 0)
@@ -1235,6 +1255,37 @@ bool inBounds(int x, int y) {
 
 double calc_dist(int x1, int y1, int x2, int y2) {
   return sqrt(pow(x1 - x2, 2) + pow(y1 - y2, 2));
+}
+
+int renderText(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size) {
+  int i;
+  for (i = 0; str[i] != '\0'; ++i) {
+    int code = str[i];
+    if (code < 0 || code > 127)
+      error("Text code out of range");
+
+    char* bitmap = font8x8_basic[code];
+    int set = 0;
+    for (int y = 0; y < 8; ++y) {
+      for (int x = 0; x < 8; ++x) {
+        set = bitmap[y] & 1 << x;
+        if (!set)
+          continue;
+
+        SDL_Rect r = {
+          .x = offset_x + i * (size) * 8 + x * size,
+          .y = offset_y + y * size,
+          .w = size,
+          .h = size
+        };
+        if (SDL_RenderFillRect(renderer, &r) < 0)
+          error("drawing text block");
+      }
+    }
+  }
+
+  // width of total text string
+  return i * size * 8;
 }
 
 void error(char* activity) {
