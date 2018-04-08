@@ -14,7 +14,7 @@ typedef unsigned char byte;
 #define PLAYER 0x8
 #define STATIC 0x10
 #define TURRET 0x20
-#define BORDER 0x40
+#define POWER 0x40
 #define SUPER 0x80
 
 #define PROCESSED 0x1
@@ -69,6 +69,8 @@ void beast_explode(entity* beast, entity* grid[], byte enclosures[]);
 entity* closest_entity(int x, int y, entity entities[], int num_entities);
 void del_entity(entity* ent, entity* grid[]);
 int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y);
+void updatePoweredWalls(entity* grid[], entity static_blocks[], int num_static_blocks);
+void setPowered(entity* grid[], int x, int y);
 void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check);
 void toggleFullScreen(SDL_Window *win);
 bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos);
@@ -264,6 +266,7 @@ int main(int num_args, char* args[]) {
                   num_collected_blocks -= block_ratio;
                   blocks[i].flags &= (~DELETED); // clear deleted bit
                   set_xy(&blocks[i], grid, x, y);
+                  updatePoweredWalls(grid, static_blocks, num_static_blocks);
                   break;
                 }
               }
@@ -288,6 +291,7 @@ int main(int num_args, char* args[]) {
                   num_collected_blocks -= block_ratio;
                   blocks[i].flags &= (~DELETED); // clear deleted bit
                   set_xy(&blocks[i], grid, x, y);
+                  updatePoweredWalls(grid, static_blocks, num_static_blocks);
                   break;
                 }
               }
@@ -465,7 +469,7 @@ int main(int num_args, char* args[]) {
       if (blocks[i].flags & DELETED)
         continue;
 
-      if (blocks[i].flags & BORDER) {
+      if (blocks[i].flags & POWER) {
         if (SDL_SetRenderDrawColor(renderer, 170, 160, 120, 255) < 0)
           error("setting enclosed border color");
       }
@@ -607,45 +611,45 @@ int main(int num_args, char* args[]) {
     }
 
     // draw darkness
-    for (int pos = 0; pos < grid_len; ++pos) {
-      int x = to_x(pos);
-      int y = to_y(pos);
+    // if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 50) < 0)
+    //   error("setting darkness color");
+    // for (int pos = 0; pos < grid_len; ++pos) {
+    //   int x = to_x(pos);
+    //   int y = to_y(pos);
 
-      if ((enclosures[pos] & ENCLOSED) ||
-        (inBounds(x + 1, y) && enclosures[to_pos(x + 1, y)] & ENCLOSED) ||
-        (inBounds(x + 1, y + 1) && enclosures[to_pos(x + 1, y + 1)] & ENCLOSED) ||
-        (inBounds(x, y + 1) && enclosures[to_pos(x, y + 1)] & ENCLOSED) ||
-        (inBounds(x - 1, y) && enclosures[to_pos(x - 1, y)] & ENCLOSED) ||
-        (inBounds(x - 1, y - 1) && enclosures[to_pos(x - 1, y - 1)] & ENCLOSED) ||
-        (inBounds(x, y - 1) && enclosures[to_pos(x, y - 1)] & ENCLOSED) ||
-        (inBounds(x + 1, y - 1) && enclosures[to_pos(x + 1, y - 1)] & ENCLOSED) ||
-        (inBounds(x - 1, y + 1) && enclosures[to_pos(x - 1, y + 1)] & ENCLOSED))
-        continue;
+    //   if ((enclosures[pos] & ENCLOSED) ||
+    //     (inBounds(x + 1, y) && enclosures[to_pos(x + 1, y)] & ENCLOSED) ||
+    //     (inBounds(x + 1, y + 1) && enclosures[to_pos(x + 1, y + 1)] & ENCLOSED) ||
+    //     (inBounds(x, y + 1) && enclosures[to_pos(x, y + 1)] & ENCLOSED) ||
+    //     (inBounds(x - 1, y) && enclosures[to_pos(x - 1, y)] & ENCLOSED) ||
+    //     (inBounds(x - 1, y - 1) && enclosures[to_pos(x - 1, y - 1)] & ENCLOSED) ||
+    //     (inBounds(x, y - 1) && enclosures[to_pos(x, y - 1)] & ENCLOSED) ||
+    //     (inBounds(x + 1, y - 1) && enclosures[to_pos(x + 1, y - 1)] & ENCLOSED) ||
+    //     (inBounds(x - 1, y + 1) && enclosures[to_pos(x - 1, y + 1)] & ENCLOSED))
+    //     continue;
 
-      double dist = -1;
-      for (int i = 0; i < num_players; ++i) {
-        if (players[i].flags & DELETED)
-          continue;
+    //   double dist = -1;
+    //   for (int i = 0; i < num_players; ++i) {
+    //     if (players[i].flags & DELETED)
+    //       continue;
 
-        double player_dist = calc_dist(x, y, players[i].x, players[i].y);
-        if (dist == -1 || player_dist < dist)
-          dist = player_dist;
-      }
+    //     double player_dist = calc_dist(x, y, players[i].x, players[i].y);
+    //     if (dist == -1 || player_dist < dist)
+    //       dist = player_dist;
+    //   }
 
-      if (dist > 10) {
-        SDL_Rect darkness = {
-          .x = x * block_w - vp.x,
-          .y = y * block_h - vp.y,
-          .w = block_w,
-          .h = block_h
-        };
+    //   if (dist > 10) {
+    //     SDL_Rect darkness = {
+    //       .x = x * block_w - vp.x,
+    //       .y = y * block_h - vp.y,
+    //       .w = block_w,
+    //       .h = block_h
+    //     };
 
-        if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 50) < 0)
-          error("setting darkness color");
-        if (SDL_RenderFillRect(renderer, &darkness) < 0)
-          error("filling darkness rect");
-      }
-    }
+    //     if (SDL_RenderFillRect(renderer, &darkness) < 0)
+    //       error("filling darkness rect");
+    //   }
+    // }
 
     if (curr_time - last_fire_time >= turret_fire_interval) {
       for (int i = 0; i < max_turrets; ++i) {
@@ -655,7 +659,7 @@ int main(int num_args, char* args[]) {
 
         // only turrets that are part of an enclosure can fire
         int pos = to_pos(turret->x, turret->y);
-        if (!(turret->flags & BORDER))
+        if (!(turret->flags & POWER))
           continue;
 
         entity* beast = closest_entity(turret->x, turret->y, beasts, num_beasts);
@@ -859,7 +863,7 @@ bool is_next_to_wall(entity* beast, entity* grid[], byte enclosures[]) {
         continue;
 
       int pos = to_pos(new_x, new_y);
-      if (grid[pos] && grid[pos]->flags & BORDER)
+      if (grid[pos] && grid[pos]->flags & POWER)
         return true;
     }
   }
@@ -898,7 +902,7 @@ void beast_explode(entity* beast, entity* grid[], byte enclosures[]) {
 
 void del_entity(entity* ent, entity* grid[]) {
   ent->flags |= DELETED; // flip DELETED bit on
-  ent->flags &= (~BORDER); // clear BORDER flag since the block will be re-used
+  ent->flags &= (~POWER); // clear POWER flag since the block will be re-used
   remove_from_grid(ent, grid);
 }
 
@@ -1014,6 +1018,41 @@ entity* closest_entity(int x, int y, entity entities[], int num_entities) {
   return winner;
 }
 
+void updatePoweredWalls(entity* grid[], entity static_blocks[], int num_static_blocks) {
+  // clear POWER bit everywhere on the grid
+  for (int i = 0; i < grid_len; ++i)
+    if (grid[i] && grid[i]->flags & POWER)
+      grid[i]->flags &= (~POWER);
+
+  for (int i = 0; i < num_static_blocks; ++i) {
+    int x = static_blocks[i].x;
+    int y = static_blocks[i].y;
+    
+    // skip rows of static blocks around edges
+    if (x == 0 || x == num_blocks_w - 1 ||
+      y == 0 || y == num_blocks_h - 1)
+        continue;
+
+    setPowered(grid, x, y);
+  }
+}
+
+void setPowered(entity* grid[], int x, int y) {
+  if (!is_in_grid(x, y))
+    return;
+
+  entity* ent = grid[to_pos(x, y)];
+  if (!ent || !(ent->flags & BLOCK) || ent->flags & POWER)
+    return;
+
+  ent->flags |= POWER;
+
+  setPowered(grid, x + 1, y);
+  setPowered(grid, x - 1, y);
+  setPowered(grid, x, y + 1);
+  setPowered(grid, x, y - 1);
+}
+
 // check all sides of the last pushed block for newly-created enclosures
 void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check) {
   if (!is_in_grid(x, y))
@@ -1063,8 +1102,8 @@ void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool ne
             enclosures[i] |= ENCLOSED;
             size++;
           }
-          if ((enclosures[i] & PROCESSED_BORDER) && grid[i])
-            grid[i]->flags |= BORDER;
+          // if ((enclosures[i] & PROCESSED_BORDER) && grid[i])
+          //   grid[i]->flags |= POWER;
           if (enclosures[i] & POWERED)
             is_powered = true;
         }
@@ -1159,11 +1198,11 @@ void floodClear(entity* grid[], byte enclosures[], int pos) {
 
       int next_pos = to_pos(new_x, new_y);
       
-      // clear the BORDER bit
+      // clear the POWER bit
       // BUG: if a block was bordering TWO enclosed areas & one cleared,
       // this will make the game will think it is not an enclosed border
       if (grid[next_pos] && grid[next_pos]->flags & BLOCK)
-        grid[next_pos]->flags &= (~BORDER);
+        grid[next_pos]->flags &= (~POWER);
 
       if (!grid[next_pos] || !(grid[next_pos]->flags & BLOCK))
         floodClear(grid, enclosures, next_pos);
