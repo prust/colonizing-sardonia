@@ -22,14 +22,15 @@ typedef unsigned char byte;
 #define ENCLOSED 0x2
 #define PROCESSED_BORDER 0x4
 #define POWERED 0x8
+#define WATER 0x10
 
 #define PICKING_UP 0
 #define PLACING 1
 
 short mode = PICKING_UP;
-int num_collected_blocks = 0;
-int block_ratio = 1; // you have to collect 2 rocks to build 1 wall
-int num_blocks_per_turret = 6; // collect 6 rocks to build 1 turret
+int num_collected_blocks = 10;
+int block_ratio = 2; // you have to collect 2 rocks to build 1 wall
+int num_blocks_per_turret = 25; // collect 5 rocks to build 1 turret
 int attack_dist = 30; // how close a beast has to be before he moves towards you
 byte beast_health = 3;
 
@@ -116,6 +117,7 @@ unsigned int last_move_time = 0;
 int beast_speed = 500; // ms between moves
 unsigned int last_fire_time = 0;
 int turret_fire_interval = 2000; // ms between turret firing
+int mine_interval = 10000; // ms between mine generating metal
 const int num_beasts = 10;
 int max_turrets = 50;
 int max_bullets = 100;
@@ -175,14 +177,21 @@ int main(int num_args, char* args[]) {
   }
 
   // DRY violation: consolidate below into place_entities()
-  int num_blocks = grid_len * block_density_pct / 100;
+  // Doing x3 to go from 20% density to 60% due to the mines
+  // really we should just have one object for every possible grid position...
+  int num_blocks = grid_len * block_density_pct * 3 / 100;
   entity blocks[num_blocks];
   for (int i = 0; i < num_blocks; ++i) {
-    int pos = findAvailPos(grid);
-    blocks[i].flags = BLOCK;
-    blocks[i].x = to_x(pos);
-    blocks[i].y = to_y(pos);
-    grid[pos] = &blocks[i];
+    if (i < grid_len * block_density_pct / 100) {
+      int pos = findAvailPos(grid);
+      blocks[i].flags = BLOCK;
+      blocks[i].x = to_x(pos);
+      blocks[i].y = to_y(pos);
+      grid[pos] = &blocks[i];
+    }
+    else {
+      blocks[i].flags = BLOCK | DELETED;
+    }
   }
 
   entity beasts[num_beasts];
@@ -627,8 +636,15 @@ int main(int num_args, char* args[]) {
 
     if (SDL_SetRenderDrawColor(renderer, 140, 60, 60, 255) < 0)
       error("setting header text color");
-    int x_pos = renderText(renderer, "Hello World!", 2, 2, text_px_size);
-    renderText(renderer, ":-)", 2 + x_pos, 2, text_px_size);
+
+    int num_mines = 0;
+    for (int i = 0; i < max_turrets; ++i)
+      if (!(turrets[i].flags & DELETED))
+        num_mines++;
+
+    char resource_str[24];
+    snprintf(resource_str, sizeof(resource_str), "Mines: %d, Metal: %d", num_mines, num_collected_blocks);
+    int x_pos = renderText(renderer, resource_str, 2, 2, text_px_size);
 
     // draw darkness
     // if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 50) < 0)
@@ -671,56 +687,65 @@ int main(int num_args, char* args[]) {
     //   }
     // }
 
-    if (curr_time - last_fire_time >= turret_fire_interval) {
+    if (curr_time - last_fire_time >= mine_interval) {
       for (int i = 0; i < max_turrets; ++i) {
         entity* turret = &turrets[i];
-        if (turret->flags & DELETED)
-          continue;
-
-        // only turrets that are part of an enclosure can fire
-        int pos = to_pos(turret->x, turret->y);
-        if (!(turret->flags & POWER))
-          continue;
-
-        entity* beast = closest_entity(turret->x, turret->y, beasts, num_beasts);
-        if (beast) {
-          double dist = calc_dist(beast->x, beast->y, turret->x, turret->y);
-          // dividing by the distance gives us a normalized 1-unit vector
-          double dx = (beast->x - turret->x) / dist;
-          double dy = (beast->y - turret->y) / dist;
-          for (int j = 0; j < max_bullets; ++j) {
-            bullet* b = &bullets[j];
-            if (b->flags & DELETED) {
-              b->flags &= (~DELETED); // clear the DELETED bit
-
-              // super turrets make super bullets
-              if (turret->flags & SUPER)
-                b->flags |= SUPER;
-              
-              // start in top/left corner
-              int start_x = turret->x * block_w;
-              int start_y = turret->y * block_h;
-              if (dx > 0)
-                start_x += block_w;
-              else
-                start_x -= 1; // so it's not on top of itself
-              if (dy > 0)
-                start_y += block_h;
-              else
-                start_y -= 1; // so it's not on top of itself
-
-              b->x = start_x;
-              b->y = start_y;
-              b->dx = dx;
-              b->dy = dy;
-              break;
-            }
-          }
-        }
-        // TODO: determine when max_bullets is exceeded & notify player?
+        if (!(turret->flags & DELETED))
+          num_collected_blocks++;
       }
       last_fire_time = curr_time;
     }
+
+    // if (curr_time - last_fire_time >= turret_fire_interval) {
+    //   for (int i = 0; i < max_turrets; ++i) {
+    //     entity* turret = &turrets[i];
+    //     if (turret->flags & DELETED)
+    //       continue;
+
+    //     // only turrets that are part of an enclosure can fire
+    //     int pos = to_pos(turret->x, turret->y);
+    //     if (!(turret->flags & POWER))
+    //       continue;
+
+    //     entity* beast = closest_entity(turret->x, turret->y, beasts, num_beasts);
+    //     if (beast) {
+    //       double dist = calc_dist(beast->x, beast->y, turret->x, turret->y);
+    //       // dividing by the distance gives us a normalized 1-unit vector
+    //       double dx = (beast->x - turret->x) / dist;
+    //       double dy = (beast->y - turret->y) / dist;
+    //       for (int j = 0; j < max_bullets; ++j) {
+    //         bullet* b = &bullets[j];
+    //         if (b->flags & DELETED) {
+    //           b->flags &= (~DELETED); // clear the DELETED bit
+
+    //           // super turrets make super bullets
+    //           if (turret->flags & SUPER)
+    //             b->flags |= SUPER;
+              
+    //           // start in top/left corner
+    //           int start_x = turret->x * block_w;
+    //           int start_y = turret->y * block_h;
+    //           if (dx > 0)
+    //             start_x += block_w;
+    //           else
+    //             start_x -= 1; // so it's not on top of itself
+    //           if (dy > 0)
+    //             start_y += block_h;
+    //           else
+    //             start_y -= 1; // so it's not on top of itself
+
+    //           b->x = start_x;
+    //           b->y = start_y;
+    //           b->dx = dx;
+    //           b->dy = dy;
+    //           break;
+    //         }
+    //       }
+    //     }
+    //     // TODO: determine when max_bullets is exceeded & notify player?
+    //   }
+    //   last_fire_time = curr_time;
+    // }
 
     if (curr_time - last_move_time >= beast_speed) {
       for (int i = 0; i < num_beasts; ++i) {
