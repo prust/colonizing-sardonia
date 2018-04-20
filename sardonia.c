@@ -18,10 +18,6 @@ typedef unsigned char byte;
 #define POWER 0x40
 #define SUPER 0x80
 
-#define PICKING_UP 0
-#define PLACING 1
-
-short mode = PICKING_UP;
 int num_collected_blocks = 10;
 int block_ratio = 2; // you have to collect 2 rocks to build 1 wall
 int num_blocks_per_turret = 25; // collect 5 rocks to build 1 turret
@@ -246,12 +242,7 @@ int main(int num_args, char* args[]) {
             int x = (evt.button.x + vp.x) / block_w;
             int y = (evt.button.y + vp.y) / block_h;
             int pos = to_pos(x, y);
-            if (grid[pos] && mode == PICKING_UP && grid[pos]->flags & BLOCK && !(grid[pos]->flags & STATIC)) {
-              // DRY violation w/ below (MOUSEBUTTONDOWN handler)
-              num_collected_blocks++;
-              del_entity(grid[pos], grid);
-            }
-            else if (!grid[pos] && mode == PLACING && num_collected_blocks >= block_ratio) {
+            if (!grid[pos] && num_collected_blocks >= block_ratio) {
               // DRY violation w/ below (MOUSEBUTTONDOWN handler)
               for (int i = 0; i < num_blocks; ++i) {
                 if (blocks[i].flags & DELETED) {
@@ -270,14 +261,7 @@ int main(int num_args, char* args[]) {
             int x = (evt.button.x + vp.x) / block_w;
             int y = (evt.button.y + vp.y) / block_h;
             int pos = to_pos(x, y);
-            if (grid[pos] && (grid[pos]->flags & BLOCK) &&
-              !(grid[pos]->flags & STATIC)) {
-                mode = PICKING_UP;
-                num_collected_blocks++;
-                del_entity(grid[pos], grid);
-            }
-            else if (!grid[pos] && num_collected_blocks >= block_ratio) {
-              mode = PLACING;
+            if (!grid[pos] && num_collected_blocks >= block_ratio) {
               for (int i = 0; i < num_blocks; ++i) {
                 if (blocks[i].flags & DELETED) {
                   num_collected_blocks -= block_ratio;
