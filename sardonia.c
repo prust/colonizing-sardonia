@@ -66,6 +66,7 @@ entity* closest_entity(int x, int y, entity entities[], int num_entities);
 void del_entity(entity* ent, entity* grid[]);
 void updatePoweredWalls(entity* grid[], entity static_blocks[], int num_static_blocks);
 void setPowered(entity* grid[], int x, int y);
+int get_move_pos(entity* beast, entity* player, entity* grid[]);
 void toggleFullScreen(SDL_Window *win);
 bool inBounds(int x, int y);
 double calc_dist(int x1, int y1, int x2, int y2);
@@ -597,132 +598,16 @@ int main(int num_args, char* args[]) {
           }
         }
 
-        int x = beasts[i].x;
-        int y = beasts[i].y;
-
-        int dir_x = 0;
-        int dir_y = 0;
-        if (player.x < x)
-          dir_x = -1;
-        else if (player.x > x)
-          dir_x = 1;
-
-        if (player.y < y)
-          dir_y = -1;
-        else if (player.y > y)
-          dir_y = 1;
-
-        bool found_direction = true;
-
-        // a quarter of the time we want them to move randomly
-        // this keeps them from being too deterministic & from getting stuck
-        // behind walls, etc
-        bool move_randomly = rand() % 100 > 75;
-
-        // if the beast isn't within the attack distance, it should move randomly
-        double dist = calc_dist(player.x, player.y, beasts[i].x, beasts[i].y);
-        if (dist > attack_dist)
-          move_randomly = true;
-
-        // the beast will "get" the player on this move
-        if (abs(player.x - x) <= 1 && abs(player.y - y) <= 1) {
-          is_gameover = true;
-          x = player.x;
-          y = player.y;
-        }
-        // try to move towards the player, if possible
-        else if (!move_randomly && dir_x && dir_y && !grid[to_pos(x + dir_x, y + dir_y)]) {
-          x += dir_x;
-          y += dir_y;
-        }
-        else if (!move_randomly && dir_x && !grid[to_pos(x + dir_x, y)]) {
-          x += dir_x;
-        }
-        else if (!move_randomly && dir_y && !grid[to_pos(x, y + dir_y)]) {
-          y += dir_y;
-        }
-        // if there's no delta in one dimension, try +/- 1
-        else if (!move_randomly && !dir_x && !grid[to_pos(x + 1, y + dir_y)]) {
-          x += 1;
-          y += dir_y;
-        }
-        else if (!move_randomly && !dir_x && !grid[to_pos(x - 1, y + dir_y)]) {
-          x -= 1;
-          y += dir_y;
-        }
-        else if (!move_randomly && !dir_y && !grid[to_pos(x + dir_x, y + 1)]) {
-          x += dir_x;
-          y += 1;
-        }
-        else if (!move_randomly && !dir_y && !grid[to_pos(x + dir_x, y - 1)]) {
-          x += dir_x;
-          y -= 1;
-        }
-        else {
-          // test all combinations of directions
-          found_direction = false;
-          for (int mv_x = -1; mv_x <= 1; ++mv_x) {
-            if (!found_direction) {
-              for (int mv_y = -1; mv_y <= 1; ++mv_y) {
-                if (!mv_x && !mv_y)
-                  continue; // 0,0 isn't a real move
-
-                if (!grid[to_pos(x + mv_x, y + mv_y)]) {
-                  found_direction = true;
-                  break;
-                }
-              }
-            }
-          }
-          if (found_direction) {
-            int mv_x = -1;
-            int mv_y = -1;
-            do {
-              int dir = rand() % 8; // there are 8 possible directions
-
-              if (dir == 0) {
-                mv_x = -1;
-                mv_y = -1;
-              }
-              else if (dir == 1) {
-                mv_x = 0;
-                mv_y = -1;
-              }
-              else if (dir == 2) {
-                mv_x = 1;
-                mv_y = -1;
-              }
-              else if (dir == 3) {
-                mv_x = -1;
-                mv_y = 0;
-              }
-              else if (dir == 4) {
-                mv_x = 1;
-                mv_y = 0;
-              }
-              else if (dir == 5) {
-                mv_x = -1;
-                mv_y = 1;
-              }
-              else if (dir == 6) {
-                mv_x = 0;
-                mv_y = 1;
-              }
-              else { // dir == 7
-                mv_x = 1;
-                mv_y = 1;
-              }
-            } while (grid[to_pos(x + mv_x, y + mv_y)]);
-            x += mv_x;
-            y += mv_y;
-          }
-        }
+        int dest_pos = get_move_pos(&beasts[i], &player, grid);
 
         // if the beast is surrounded by blocks & has nowhere to move, it blows up
-        if (!found_direction)
+        if (dest_pos == -1)
           beast_explode(&beasts[i], grid);
         else
-          move(&beasts[i], grid, x, y);
+          move(&beasts[i], grid, to_x(dest_pos), to_y(dest_pos));
+        
+        if (beasts[i].x == player.x && beasts[i].y == player.y)
+          is_gameover = true;
       }
       last_move_time = curr_time;
     }
@@ -887,6 +772,133 @@ void setPowered(entity* grid[], int x, int y) {
   setPowered(grid, x - 1, y);
   setPowered(grid, x, y + 1);
   setPowered(grid, x, y - 1);
+}
+
+int get_move_pos(entity* beast, entity* player, entity* grid[]) {
+  int x = beast->x;
+  int y = beast->y;
+
+  int dir_x = 0;
+  int dir_y = 0;
+  if (player->x < x)
+    dir_x = -1;
+  else if (player->x > x)
+    dir_x = 1;
+
+  if (player->y < y)
+    dir_y = -1;
+  else if (player->y > y)
+    dir_y = 1;
+
+  bool found_direction = true;
+
+  // a quarter of the time we want them to move randomly
+  // this keeps them from being too deterministic & from getting stuck
+  // behind walls, etc
+  bool move_randomly = rand() % 100 > 75;
+
+  // if the beast isn't within the attack distance, it should move randomly
+  double dist = calc_dist(player->x, player->y, beast->x, beast->y);
+  if (dist > attack_dist)
+    move_randomly = true;
+
+  // the beast will "get" the player on this move
+  if (abs(player->x - x) <= 1 && abs(player->y - y) <= 1) {
+    x = player->x;
+    y = player->y;
+  }
+  // try to move towards the player, if possible
+  else if (!move_randomly && dir_x && dir_y && !grid[to_pos(x + dir_x, y + dir_y)]) {
+    x += dir_x;
+    y += dir_y;
+  }
+  else if (!move_randomly && dir_x && !grid[to_pos(x + dir_x, y)]) {
+    x += dir_x;
+  }
+  else if (!move_randomly && dir_y && !grid[to_pos(x, y + dir_y)]) {
+    y += dir_y;
+  }
+  // if there's no delta in one dimension, try +/- 1
+  else if (!move_randomly && !dir_x && !grid[to_pos(x + 1, y + dir_y)]) {
+    x += 1;
+    y += dir_y;
+  }
+  else if (!move_randomly && !dir_x && !grid[to_pos(x - 1, y + dir_y)]) {
+    x -= 1;
+    y += dir_y;
+  }
+  else if (!move_randomly && !dir_y && !grid[to_pos(x + dir_x, y + 1)]) {
+    x += dir_x;
+    y += 1;
+  }
+  else if (!move_randomly && !dir_y && !grid[to_pos(x + dir_x, y - 1)]) {
+    x += dir_x;
+    y -= 1;
+  }
+  else {
+    // test all combinations of directions
+    found_direction = false;
+    for (int mv_x = -1; mv_x <= 1; ++mv_x) {
+      if (!found_direction) {
+        for (int mv_y = -1; mv_y <= 1; ++mv_y) {
+          if (!mv_x && !mv_y)
+            continue; // 0,0 isn't a real move
+
+          if (!grid[to_pos(x + mv_x, y + mv_y)]) {
+            found_direction = true;
+            break;
+          }
+        }
+      }
+    }
+    if (found_direction) {
+      int mv_x = -1;
+      int mv_y = -1;
+      do {
+        int dir = rand() % 8; // there are 8 possible directions
+
+        if (dir == 0) {
+          mv_x = -1;
+          mv_y = -1;
+        }
+        else if (dir == 1) {
+          mv_x = 0;
+          mv_y = -1;
+        }
+        else if (dir == 2) {
+          mv_x = 1;
+          mv_y = -1;
+        }
+        else if (dir == 3) {
+          mv_x = -1;
+          mv_y = 0;
+        }
+        else if (dir == 4) {
+          mv_x = 1;
+          mv_y = 0;
+        }
+        else if (dir == 5) {
+          mv_x = -1;
+          mv_y = 1;
+        }
+        else if (dir == 6) {
+          mv_x = 0;
+          mv_y = 1;
+        }
+        else { // dir == 7
+          mv_x = 1;
+          mv_y = 1;
+        }
+      } while (grid[to_pos(x + mv_x, y + mv_y)]);
+      x += mv_x;
+      y += mv_y;
+    }
+  }
+
+  if (!found_direction)
+    return -1;
+  else
+    return to_pos(x, y);
 }
 
 void toggleFullScreen(SDL_Window *win) {
