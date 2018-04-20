@@ -18,9 +18,10 @@ typedef unsigned char byte;
 #define POWER 0x40
 #define SUPER 0x80
 
-int num_collected_blocks = 10;
+int num_collected_blocks = 100;
 int block_ratio = 2; // you have to collect 2 rocks to build 1 wall
 int num_blocks_per_turret = 25; // collect 5 rocks to build 1 turret
+int num_block_per_refurb = 15; // discount if you "refurbish" an existing block to build a turret
 int attack_dist = 30; // how close a beast has to be before he moves towards you
 byte beast_health = 3;
 
@@ -242,17 +243,24 @@ int main(int num_args, char* args[]) {
             int x = (evt.button.x + vp.x) / block_w;
             int y = (evt.button.y + vp.y) / block_h;
             int pos = to_pos(x, y);
-            if (!grid[pos] && num_collected_blocks >= block_ratio) {
-              // DRY violation w/ below (MOUSEBUTTONDOWN handler)
-              for (int i = 0; i < num_blocks; ++i) {
-                if (blocks[i].flags & DELETED) {
-                  num_collected_blocks -= block_ratio;
-                  blocks[i].flags &= (~DELETED); // clear deleted bit
-                  set_xy(&blocks[i], grid, x, y);
+
+            bool is_refurb = grid[pos] && grid[pos]->flags == BLOCK;
+            int num_required_blocks = is_refurb ? num_block_per_refurb : num_blocks_per_turret;
+            if ((!grid[pos] || is_refurb) && num_collected_blocks >= num_required_blocks) {
+              for (int i = 0; i < max_turrets; ++i) {
+                if (turrets[i].flags & DELETED) {
+                  if (is_refurb)
+                    del_entity(grid[pos], grid);
+
+                  num_collected_blocks -= num_required_blocks;
+                  turrets[i].flags &= (~DELETED); // clear deleted bit
+                  set_xy(&turrets[i], grid, x, y);
                   update_powered_walls(grid, static_blocks, num_static_blocks);
                   break;
                 }
               }
+              // TODO: how do we determine if max_turrets has been reached
+              // and alert the player?
             }
           }
           break;
@@ -261,28 +269,19 @@ int main(int num_args, char* args[]) {
             int x = (evt.button.x + vp.x) / block_w;
             int y = (evt.button.y + vp.y) / block_h;
             int pos = to_pos(x, y);
-            if (!grid[pos] && num_collected_blocks >= block_ratio) {
-              for (int i = 0; i < num_blocks; ++i) {
-                if (blocks[i].flags & DELETED) {
-                  num_collected_blocks -= block_ratio;
-                  blocks[i].flags &= (~DELETED); // clear deleted bit
-                  set_xy(&blocks[i], grid, x, y);
-                  update_powered_walls(grid, static_blocks, num_static_blocks);
-                  break;
-                }
-              }
-            }
-          }
-          else if (evt.button.button == SDL_BUTTON_RIGHT) {
-            int x = (evt.button.x + vp.x) / block_w;
-            int y = (evt.button.y + vp.y) / block_h;
-            int pos = to_pos(x, y);
-            if (!grid[pos] && num_collected_blocks >= num_blocks_per_turret) {
+
+            bool is_refurb = grid[pos] && grid[pos]->flags == BLOCK;
+            int num_required_blocks = is_refurb ? num_block_per_refurb : num_blocks_per_turret;
+            if ((!grid[pos] || is_refurb) && num_collected_blocks >= num_required_blocks) {
               for (int i = 0; i < max_turrets; ++i) {
                 if (turrets[i].flags & DELETED) {
-                  num_collected_blocks -= num_blocks_per_turret;
+                  if (is_refurb)
+                    del_entity(grid[pos], grid);
+                  
+                  num_collected_blocks -= num_required_blocks;
                   turrets[i].flags &= (~DELETED); // clear deleted bit
                   set_xy(&turrets[i], grid, x, y);
+                  update_powered_walls(grid, static_blocks, num_static_blocks);
                   break;
                 }
               }
