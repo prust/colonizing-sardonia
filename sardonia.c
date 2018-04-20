@@ -221,18 +221,35 @@ int main(int num_args, char* args[]) {
 
   // game loop (incl. events, update & draw)
   bool is_gameover = false;
+  bool is_paused = false;
   int dir_x = 0;
   int dir_y = 0;
   unsigned int last_loop_time = SDL_GetTicks();
   while (!is_gameover) {
+    SDL_Event evt;
+    if (is_paused) {
+      while (SDL_PollEvent(&evt))
+        if (evt.type == SDL_KEYDOWN && evt.key.keysym.sym == SDLK_SPACE)
+          is_paused = false;
+
+      if (is_paused) {
+        SDL_Delay(10);
+        continue;
+      }
+      else {
+        // reset last_loop_time when coming out of a pause state
+        // otherwise the game will react as if a ton of time has gone by
+        last_loop_time = SDL_GetTicks();
+      }
+    }
+
     unsigned int curr_time = SDL_GetTicks();
     double dt = (curr_time - last_loop_time) / 1000.0; // dt should always be in seconds
     last_loop_time = curr_time;
 
     const Uint8 *state = SDL_GetKeyboardState(NULL);
-    bool is_spacebar_pressed = state[SDL_SCANCODE_SPACE];
+    bool is_spacebar_pressed = state[SDL_SCANCODE_SPACE]; // TODO: change cursor to hand & use it to scroll
     
-    SDL_Event evt;
     while (SDL_PollEvent(&evt)) {
       switch(evt.type) {
         case SDL_QUIT:
@@ -315,6 +332,9 @@ int main(int num_args, char* args[]) {
               break;
             case SDLK_f:
               toggle_fullscreen(window);
+              break;
+            case SDLK_SPACE:
+              is_paused = !is_paused;
               break;
           }
 
