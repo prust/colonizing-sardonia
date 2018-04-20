@@ -18,11 +18,6 @@ typedef unsigned char byte;
 #define POWER 0x40
 #define SUPER 0x80
 
-#define PROCESSED 0x1
-#define ENCLOSED 0x2
-#define PROCESSED_BORDER 0x4
-#define POWERED 0x8
-
 #define PICKING_UP 0
 #define PLACING 1
 
@@ -69,11 +64,9 @@ bool is_next_to_wall(entity* beast, entity* grid[]);
 void beast_explode(entity* beast, entity* grid[]);
 entity* closest_entity(int x, int y, entity entities[], int num_entities);
 void del_entity(entity* ent, entity* grid[]);
-int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y);
 void updatePoweredWalls(entity* grid[], entity static_blocks[], int num_static_blocks);
 void setPowered(entity* grid[], int x, int y);
 void toggleFullScreen(SDL_Window *win);
-int imin(int i, int j);
 bool inBounds(int x, int y);
 double calc_dist(int x1, int y1, int x2, int y2);
 int renderText(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size);
@@ -335,28 +328,8 @@ int main(int num_args, char* args[]) {
               break;
           }
 
-          if (dir_x || dir_y) {
-            int orig_x = player.x;
-            int orig_y = player.y;
-            int new_x = orig_x + dir_x;
-            int new_y = orig_y + dir_y;
-            entity* pushed_ent = NULL;
-            if (new_x >= 0 && new_x < num_blocks_w &&
-                new_y >= 0 && new_y < num_blocks_h) {
-              pushed_ent = grid[to_pos(new_x, new_y)];
-            }
-
-            int num_blocks_pushed = push(grid, dir_x, dir_y, player.x, player.y);
-            if (num_blocks_pushed > -1) {
-              move(&player, grid, new_x, new_y);
-              
-              if (is_spacebar_pressed) {
-                entity* ent_behind = grid[to_pos(orig_x - dir_x, orig_y - dir_y)];
-                if (ent_behind && (ent_behind->flags & BLOCK) && !(ent_behind->flags & STATIC))
-                  move(ent_behind, grid, orig_x, orig_y);
-              }
-            }
-          }
+          if ((dir_x || dir_y) && !grid[to_pos(player.x + dir_x, player.y + dir_y)])
+            move(&player, grid, player.x + dir_x, player.y + dir_y);
         break;
       }
     }
@@ -393,7 +366,7 @@ int main(int num_args, char* args[]) {
 
       if (blocks[i].flags & POWER) {
         if (SDL_SetRenderDrawColor(renderer, 170, 160, 120, 255) < 0)
-          error("setting enclosed border color");
+          error("setting powered border color");
       }
       else {
         if (SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255) < 0)
@@ -809,46 +782,6 @@ void del_entity(entity* ent, entity* grid[]) {
   remove_from_grid(ent, grid);
 }
 
-int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y) {
-  entity* first_ent = grid[to_pos(pos_x + dir_x, pos_y + dir_y)];
-  if (!first_ent)
-    return 0;
-  if (first_ent->flags & STATIC)
-    return -1;
-
-  int second_x = pos_x + dir_x*2;
-  int second_y = pos_y + dir_y*2;
-  int num_blocks_pushed;
-  entity* second_ent = grid[to_pos(second_x, second_y)];
-  if (!second_ent) {
-    num_blocks_pushed = 1;
-  }
-  else if (second_ent->flags & BLOCK) {
-    num_blocks_pushed = push(grid, dir_x, dir_y, pos_x + dir_x, pos_y + dir_y);
-    if (num_blocks_pushed > -1)
-      num_blocks_pushed++;
-  }
-  else if (second_ent->flags & PLAYER) {
-    num_blocks_pushed = -1;
-  }
-  else if (second_ent->flags & BEAST) {
-    // if there's a block on the other side, squish beast between blocks
-    entity* third_ent = grid[to_pos(pos_x + dir_x*3, pos_y + dir_y*3)];
-    if (third_ent && third_ent->flags & BLOCK) {
-      del_entity(second_ent, grid);
-      num_blocks_pushed = 0;
-    }
-    else {
-      num_blocks_pushed = -1;
-    }
-  }
-
-  if (num_blocks_pushed > -1)
-    move(first_ent, grid, second_x, second_y);
-
-  return num_blocks_pushed;
-}
-
 int findAvailPos(entity* grid[]) {
   int x;
   int y;
@@ -965,13 +898,6 @@ void toggleFullScreen(SDL_Window *win) {
 
   if (SDL_SetWindowFullscreen(win, flags) < 0)
     error("Toggling fullscreen mode failed");
-}
-
-int imin(int i, int j) {
-  if (i < j)
-    return i;
-  else
-    return j;
 }
 
 bool inBounds(int x, int y) {
