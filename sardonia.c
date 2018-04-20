@@ -65,17 +65,14 @@ int to_x(int ix);
 int to_y(int ix);
 int to_pos(int x, int y);
 bool is_in_grid(int x, int y);
-bool is_next_to_wall(entity* beast, entity* grid[], byte enclosures[]);
-void beast_explode(entity* beast, entity* grid[], byte enclosures[]);
+bool is_next_to_wall(entity* beast, entity* grid[]);
+void beast_explode(entity* beast, entity* grid[]);
 entity* closest_entity(int x, int y, entity entities[], int num_entities);
 void del_entity(entity* ent, entity* grid[]);
 int push(entity* grid[], int dir_x, int dir_y, int pos_x, int pos_y);
 void updatePoweredWalls(entity* grid[], entity static_blocks[], int num_static_blocks);
 void setPowered(entity* grid[], int x, int y);
-void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check);
 void toggleFullScreen(SDL_Window *win);
-bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos);
-void floodClear(entity* grid[], byte enclosures[], int pos);
 int imin(int i, int j);
 bool inBounds(int x, int y);
 double calc_dist(int x1, int y1, int x2, int y2);
@@ -120,10 +117,10 @@ int main(int num_args, char* args[]) {
 
   grid_len = num_blocks_w * num_blocks_h;
   entity* grid[grid_len];
-  byte enclosures[grid_len];
+  byte grid_flags[grid_len];
   for (int i = 0; i < grid_len; ++i) {
     grid[i] = NULL;
-    enclosures[i] = 0;
+    grid_flags[i] = 0;
   }
 
   int num_static_blocks = num_blocks_w * 2 + (num_blocks_h - 2) * 2 + 10;
@@ -352,31 +349,11 @@ int main(int num_args, char* args[]) {
             int num_blocks_pushed = push(grid, dir_x, dir_y, player.x, player.y);
             if (num_blocks_pushed > -1) {
               move(&player, grid, new_x, new_y);
-              if (num_blocks_pushed > 0 && pushed_ent) {
-                // check if previous enclosure was just broken
-                checkForEnclosures(grid, enclosures, pushed_ent->x - dir_x, pushed_ent->y - dir_y, false);
-                // check if we just expanded an enclosure
-                if (enclosures[to_pos(orig_x, orig_y)] & ENCLOSED)
-                  enclosures[to_pos(new_x, new_y)] |= ENCLOSED;
-
-                int final_x = new_x;
-                int final_y = new_y;
-                if (dir_x)
-                  final_x += num_blocks_pushed * dir_x;
-                else if (dir_y)
-                  final_y += num_blocks_pushed * dir_y;
-
-                // check the last pushed block to see if a new enclosure was just created
-                checkForEnclosures(grid, enclosures, final_x, final_y, true);
-              }
               
               if (is_spacebar_pressed) {
                 entity* ent_behind = grid[to_pos(orig_x - dir_x, orig_y - dir_y)];
-                if (ent_behind && (ent_behind->flags & BLOCK) && !(ent_behind->flags & STATIC)) {
+                if (ent_behind && (ent_behind->flags & BLOCK) && !(ent_behind->flags & STATIC))
                   move(ent_behind, grid, orig_x, orig_y);
-                  checkForEnclosures(grid, enclosures, orig_x - dir_x, orig_y - dir_y, false);
-                  checkForEnclosures(grid, enclosures, ent_behind->x, ent_behind->y, true);
-                }
               }
             }
           }
@@ -640,9 +617,9 @@ int main(int num_args, char* args[]) {
         if (beasts[i].flags & DELETED)
           continue;
 
-        if (is_next_to_wall(&beasts[i], grid, enclosures)) {
+        if (is_next_to_wall(&beasts[i], grid)) {
           if (beasts[i].flags & SUPER || rand() % 100 >= 98) {
-            beast_explode(&beasts[i], grid, enclosures);
+            beast_explode(&beasts[i], grid);
             continue;
           }
         }
@@ -770,7 +747,7 @@ int main(int num_args, char* args[]) {
 
         // if the beast is surrounded by blocks & has nowhere to move, it blows up
         if (!found_direction)
-          beast_explode(&beasts[i], grid, enclosures);
+          beast_explode(&beasts[i], grid);
         else
           move(&beasts[i], grid, x, y);
       }
@@ -786,7 +763,7 @@ int main(int num_args, char* args[]) {
   return 0;
 }
 
-bool is_next_to_wall(entity* beast, entity* grid[], byte enclosures[]) {
+bool is_next_to_wall(entity* beast, entity* grid[]) {
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
     for (int dir_y = -1; dir_y <= 1; ++dir_y) {
       // check the bounds
@@ -803,7 +780,7 @@ bool is_next_to_wall(entity* beast, entity* grid[], byte enclosures[]) {
   return false;
 }
 
-void beast_explode(entity* beast, entity* grid[], byte enclosures[]) {
+void beast_explode(entity* beast, entity* grid[]) {
   int x = beast->x;
   int y = beast->y;
 
@@ -824,13 +801,6 @@ void beast_explode(entity* beast, entity* grid[], byte enclosures[]) {
         del_entity(ent, grid);
     }
   }
-
-  // BUG: this only works if the beast was IN the enclosure
-  // not if the beast outside the wall of an enclosure
-  // we can check `enclosures` to know which situation we're in (if either)...
-
-  // check if previous enclosure was just broken
-  checkForEnclosures(grid, enclosures, x, y, false);
 }
 
 void del_entity(entity* ent, entity* grid[]) {
@@ -984,163 +954,6 @@ void setPowered(entity* grid[], int x, int y) {
   setPowered(grid, x - 1, y);
   setPowered(grid, x, y + 1);
   setPowered(grid, x, y - 1);
-}
-
-// check all sides of the last pushed block for newly-created enclosures
-void checkForEnclosures(entity* grid[], byte enclosures[], int x, int y, bool new_check) {
-  if (!is_in_grid(x, y))
-    return;
-
-  // clear the PROCESSED & PROCESSED_BORDER bits from everything before beginning
-  for (int i = 0; i < grid_len; ++i) {
-    enclosures[i] &= (~PROCESSED);
-    enclosures[i] &= (~PROCESSED_BORDER);
-    enclosures[i] &= (~POWERED);
-  }
-
-  for (int dir_x = -1; dir_x <= 1; ++dir_x) {
-    for (int dir_y = -1; dir_y <= 1; ++dir_y) {
-      // check the bounds
-      int new_x = x + dir_x;
-      int new_y = y + dir_y;
-      if (!is_in_grid(new_x, new_y))
-        continue;
-
-      int pos = to_pos(new_x, new_y);
-      
-      // if it's a block, skip it (only flood-fill non-blocks)
-      if (grid[pos] && grid[pos]->flags & BLOCK)
-        continue;
-
-      // if we processed this square in the last flood-fill, skip it
-      if (enclosures[pos] & PROCESSED)
-        continue;
-
-      // clear the processed bits from the last flood-fill
-      for (int i = 0; i < grid_len; ++i) {
-        enclosures[i] &= (~PROCESSED);
-        enclosures[i] &= (~PROCESSED_BORDER);
-        enclosures[i] &= (~POWERED);
-      }
-      
-      // everything that can flood-fill is enclosed; mark it as such
-      int prev_pos = -1;
-      bool is_enclosure = floodFill(grid, enclosures, prev_pos, pos);
-
-      if (new_check && is_enclosure) {
-        int size = 0;
-        bool is_powered = false;
-        for (int i = 0; i < grid_len; ++i) {
-          if (enclosures[i] & PROCESSED) {
-            enclosures[i] |= ENCLOSED;
-            size++;
-          }
-          // if ((enclosures[i] & PROCESSED_BORDER) && grid[i])
-          //   grid[i]->flags |= POWER;
-          if (enclosures[i] & POWERED)
-            is_powered = true;
-        }
-
-        // TODO: assign fortress FKs and set fortress.size
-
-        if (is_powered)
-          for (int i = 0; i < grid_len; ++i)
-            if ((enclosures[i] & PROCESSED_BORDER) && grid[i])
-              grid[i]->flags |= SUPER; // super block = power stone
-      }
-      else if (!new_check && !is_enclosure && enclosures[pos] & ENCLOSED) {
-        floodClear(grid, enclosures, pos);
-      }
-    }
-  }
-}
-
-// instead of walking paths & borders, do a flood-fill
-// disallow edge-blocks, if you touch an edge (define by x/y, not static), then it's not enclosed
-// if an edge is not touched, then hurrah, we have an enclosed area
-// we should be able to have a recursive tree of function calls, if any hit an edge, they return false
-// at the end, we have a true/false result -- at that point, we can either walk them all & flip the ENCLOSED bit or unflip it
-bool floodFill(entity* grid[], byte enclosures[], int prev_pos, int pos) {
-  int x = to_x(pos);
-  int y = to_y(pos);
-  
-  // we've branched off & hit something already covered by another branch
-  if (enclosures[pos] & PROCESSED)
-    return true;
-
-  // mark it as processed
-  enclosures[pos] |= PROCESSED;
-
-  for (int dir_x = -1; dir_x <= 1; ++dir_x) {
-    for (int dir_y = -1; dir_y <= 1; ++dir_y) {
-      // disallow no movement
-      if (!dir_x && !dir_y)
-        continue;
-
-      // check the bounds
-      int new_x = x + dir_x;
-      int new_y = y + dir_y;
-      if (!is_in_grid(new_x, new_y))
-        continue;
-
-      // ignore the previous position
-      int next_pos = to_pos(new_x, new_y);
-      if (next_pos == prev_pos)
-        continue;
-
-      // if we hit one of the edges, then this is *not* enclosed
-      if (new_x == 0 || new_y == 0 || new_x == num_blocks_w - 1 || new_y == num_blocks_h - 1)
-        return false;
-
-      // mark border of processed area
-      if (grid[next_pos] && grid[next_pos]->flags & BLOCK) {
-        enclosures[next_pos] |= PROCESSED_BORDER;
-        if (grid[next_pos]->flags & STATIC)
-          enclosures[next_pos] |= POWERED;
-      }
-
-      if (!grid[next_pos] || !(grid[next_pos]->flags & BLOCK))
-        if (!floodFill(grid, enclosures, pos, next_pos))
-          return false;
-    }
-  }
-  return true;
-}
-
-void floodClear(entity* grid[], byte enclosures[], int pos) {
-  if (!(enclosures[pos] & ENCLOSED))
-    return;
-
-  // clear the ENCLOSURE bit
-  enclosures[pos] &= (~ENCLOSED);
-
-  int x = to_x(pos);
-  int y = to_y(pos);
-  for (int dir_x = -1; dir_x <= 1; ++dir_x) {
-    for (int dir_y = -1; dir_y <= 1; ++dir_y) {
-      // disallow no movement
-      if (!dir_x && !dir_y)
-        continue;
-
-      // check the bounds
-      int new_x = x + dir_x;
-      int new_y = y + dir_y;
-      if ((new_x < 0 || new_x >= num_blocks_w) ||
-        (new_y < 0 || new_y >= num_blocks_h))
-          continue;
-
-      int next_pos = to_pos(new_x, new_y);
-      
-      // clear the POWER bit
-      // BUG: if a block was bordering TWO enclosed areas & one cleared,
-      // this will make the game will think it is not an enclosed border
-      if (grid[next_pos] && grid[next_pos]->flags & BLOCK)
-        grid[next_pos]->flags &= (~POWER);
-
-      if (!grid[next_pos] || !(grid[next_pos]->flags & BLOCK))
-        floodClear(grid, enclosures, next_pos);
-    }
-  }
 }
 
 void toggleFullScreen(SDL_Window *win) {
