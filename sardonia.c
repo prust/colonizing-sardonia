@@ -50,8 +50,8 @@ typedef struct {
   double dy;
 } bullet;
 
-// forward-declare functions
-int findAvailPos(entity* grid[]);
+// grid functions
+int find_avail_pos(entity* grid[]);
 void move(entity* ent, entity* grid[], int x, int y);
 void set_pos(entity* ent, entity* grid[], int pos);
 void set_xy(entity* ent, entity* grid[], int x, int y);
@@ -60,17 +60,21 @@ int to_x(int ix);
 int to_y(int ix);
 int to_pos(int x, int y);
 bool is_in_grid(int x, int y);
+
+// game-specific functions
 bool is_next_to_wall(entity* beast, entity* grid[]);
 void beast_explode(entity* beast, entity* grid[]);
 entity* closest_entity(int x, int y, entity entities[], int num_entities);
 void del_entity(entity* ent, entity* grid[]);
-void updatePoweredWalls(entity* grid[], entity static_blocks[], int num_static_blocks);
-void setPowered(entity* grid[], int x, int y);
+void update_powered_walls(entity* grid[], entity static_blocks[], int num_static_blocks);
+void set_powered(entity* grid[], int x, int y);
 int get_move_pos(entity* beast, entity* player, entity* grid[]);
-void toggleFullScreen(SDL_Window *win);
-bool inBounds(int x, int y);
+
+// generic functions
+void toggle_fullscreen(SDL_Window *win);
+bool in_bounds(int x, int y);
 double calc_dist(int x1, int y1, int x2, int y2);
-int renderText(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size);
+int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size);
 void error(char* activity);
 
 int block_w = 40;
@@ -145,11 +149,11 @@ int main(int num_args, char* args[]) {
   }
 
   // set the position of the 1st player
-  set_pos(&player, grid, findAvailPos(grid));
+  set_pos(&player, grid, find_avail_pos(grid));
 
   // additional 10 static blocks in the playing field
   for (int i = 0; i < 10; ++i) {
-    int pos = findAvailPos(grid);
+    int pos = find_avail_pos(grid);
     static_blocks[ix].flags = (BLOCK | STATIC);
     static_blocks[ix].x = to_x(pos);
     static_blocks[ix].y = to_y(pos);
@@ -164,7 +168,7 @@ int main(int num_args, char* args[]) {
   entity blocks[num_blocks];
   for (int i = 0; i < num_blocks; ++i) {
     if (i < grid_len * block_density_pct / 100) {
-      int pos = findAvailPos(grid);
+      int pos = find_avail_pos(grid);
       blocks[i].flags = BLOCK;
       blocks[i].x = to_x(pos);
       blocks[i].y = to_y(pos);
@@ -179,7 +183,7 @@ int main(int num_args, char* args[]) {
   for (int i = 0; i < num_beasts; ++i) {
     int pos;
     do {
-      pos = findAvailPos(grid);
+      pos = find_avail_pos(grid);
     } while (abs(player.x - to_x(pos)) < starting_distance && abs(player.y - to_y(pos)) < starting_distance);
 
     beasts[i].flags = BEAST;
@@ -205,8 +209,6 @@ int main(int num_args, char* args[]) {
   window = SDL_CreateWindow("Beast", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, num_blocks_w * block_w, num_blocks_h * block_h, SDL_WINDOW_RESIZABLE);
   if (!window)
     error("creating window");
-  // if (SDL_ShowCursor(SDL_DISABLE) < 0)
-  //   error("hiding cursor");
 
   SDL_GetWindowSize(window, &vp.w, &vp.h);
 
@@ -256,7 +258,7 @@ int main(int num_args, char* args[]) {
                   num_collected_blocks -= block_ratio;
                   blocks[i].flags &= (~DELETED); // clear deleted bit
                   set_xy(&blocks[i], grid, x, y);
-                  updatePoweredWalls(grid, static_blocks, num_static_blocks);
+                  update_powered_walls(grid, static_blocks, num_static_blocks);
                   break;
                 }
               }
@@ -281,7 +283,7 @@ int main(int num_args, char* args[]) {
                   num_collected_blocks -= block_ratio;
                   blocks[i].flags &= (~DELETED); // clear deleted bit
                   set_xy(&blocks[i], grid, x, y);
-                  updatePoweredWalls(grid, static_blocks, num_static_blocks);
+                  update_powered_walls(grid, static_blocks, num_static_blocks);
                   break;
                 }
               }
@@ -325,7 +327,7 @@ int main(int num_args, char* args[]) {
               dir_y = 1;
               break;
             case SDLK_f:
-              toggleFullScreen(window);
+              toggle_fullscreen(window);
               break;
           }
 
@@ -524,7 +526,7 @@ int main(int num_args, char* args[]) {
 
     char resource_str[24];
     snprintf(resource_str, sizeof(resource_str), "Mines: %d, Metal: %d", num_mines, num_collected_blocks);
-    int x_pos = renderText(renderer, resource_str, 2, 2, text_px_size);
+    int x_pos = render_text(renderer, resource_str, 2, 2, text_px_size);
 
     if (curr_time - last_fire_time >= mine_interval) {
       for (int i = 0; i < max_turrets; ++i) {
@@ -621,6 +623,73 @@ int main(int num_args, char* args[]) {
   return 0;
 }
 
+// Grid Functions
+
+bool in_bounds(int x, int y) {
+  return x >= 0 && x < num_blocks_w &&
+    y >= 0 && y < num_blocks_h;
+}
+
+int find_avail_pos(entity* grid[]) {
+  int x;
+  int y;
+  int pos;
+  do {
+    x = rand() % num_blocks_w;
+    y = rand() % num_blocks_h;
+    pos = to_pos(x, y);
+  } while (grid[pos]);
+  return pos;
+}
+
+void move(entity* ent, entity* grid[], int x, int y) {
+  remove_from_grid(ent, grid);
+  set_xy(ent, grid, x, y);
+}
+
+void set_pos(entity* ent, entity* grid[], int pos) {
+  set_xy(ent, grid, to_x(pos), to_y(pos));
+}
+
+void set_xy(entity* ent, entity* grid[], int x, int y) {
+  ent->x = x;
+  ent->y = y;
+  grid[to_pos(x, y)] = ent;
+}
+
+void remove_from_grid(entity* ent, entity* grid[]) {
+  int prev_pos = to_pos(ent->x, ent->y);
+  grid[prev_pos] = NULL;
+}
+
+int to_x(int ix) {
+  return ix % num_blocks_w;
+}
+
+int to_y(int ix) {
+  return ix / num_blocks_w;
+}
+
+int to_pos(int x, int y) {
+  int pos = x + y * num_blocks_w;
+  if (pos < 0)
+    error("position out of bounds (negative)");
+  if (pos >= grid_len)
+    error("position out of bounds (greater than grid size)");
+  return pos;
+}
+
+bool is_in_grid(int x, int y) {
+  if ((x < 0 || x >= num_blocks_w) ||
+    (y < 0 || y >= num_blocks_h))
+      return false;
+
+  return true;
+}
+
+
+// Game-Specific Functions
+
 bool is_next_to_wall(entity* beast, entity* grid[]) {
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
     for (int dir_y = -1; dir_y <= 1; ++dir_y) {
@@ -661,67 +730,6 @@ void beast_explode(entity* beast, entity* grid[]) {
   }
 }
 
-void del_entity(entity* ent, entity* grid[]) {
-  ent->flags |= DELETED; // flip DELETED bit on
-  ent->flags &= (~POWER); // clear POWER flag since the block will be re-used
-  remove_from_grid(ent, grid);
-}
-
-int findAvailPos(entity* grid[]) {
-  int x;
-  int y;
-  int pos;
-  do {
-    x = rand() % num_blocks_w;
-    y = rand() % num_blocks_h;
-    pos = to_pos(x, y);
-  } while (grid[pos]);
-  return pos;
-}
-
-void move(entity* ent, entity* grid[], int x, int y) {
-  remove_from_grid(ent, grid);
-  set_xy(ent, grid, x, y);
-}
-
-void set_pos(entity* ent, entity* grid[], int pos) {
-  set_xy(ent, grid, to_x(pos), to_y(pos));
-}
-
-void set_xy(entity* ent, entity* grid[], int x, int y) {
-  ent->x = x;
-  ent->y = y;
-  grid[to_pos(x, y)] = ent;
-}
-
-void remove_from_grid(entity* ent, entity* grid[]) {
-  int prev_pos = to_pos(ent->x, ent->y);
-  grid[prev_pos] = NULL;
-}
-
-int to_x(int ix) {
-  return ix % num_blocks_w;
-}
-int to_y(int ix) {
-  return ix / num_blocks_w;
-}
-int to_pos(int x, int y) {
-  int pos = x + y * num_blocks_w;
-  if (pos < 0)
-    error("position out of bounds (negative)");
-  if (pos >= grid_len)
-    error("position out of bounds (greater than grid size)");
-  return pos;
-}
-
-bool is_in_grid(int x, int y) {
-  if ((x < 0 || x >= num_blocks_w) ||
-    (y < 0 || y >= num_blocks_h))
-      return false;
-
-  return true;
-}
-
 entity* closest_entity(int x, int y, entity entities[], int num_entities) {
   entity* winner = NULL;
   double winner_dist = -1;
@@ -739,7 +747,13 @@ entity* closest_entity(int x, int y, entity entities[], int num_entities) {
   return winner;
 }
 
-void updatePoweredWalls(entity* grid[], entity static_blocks[], int num_static_blocks) {
+void del_entity(entity* ent, entity* grid[]) {
+  ent->flags |= DELETED; // flip DELETED bit on
+  ent->flags &= (~POWER); // clear POWER flag since the block will be re-used
+  remove_from_grid(ent, grid);
+}
+
+void update_powered_walls(entity* grid[], entity static_blocks[], int num_static_blocks) {
   // clear POWER bit everywhere on the grid
   for (int i = 0; i < grid_len; ++i)
     if (grid[i] && grid[i]->flags & POWER)
@@ -754,11 +768,11 @@ void updatePoweredWalls(entity* grid[], entity static_blocks[], int num_static_b
       y == 0 || y == num_blocks_h - 1)
         continue;
 
-    setPowered(grid, x, y);
+    set_powered(grid, x, y);
   }
 }
 
-void setPowered(entity* grid[], int x, int y) {
+void set_powered(entity* grid[], int x, int y) {
   if (!is_in_grid(x, y))
     return;
 
@@ -768,10 +782,10 @@ void setPowered(entity* grid[], int x, int y) {
 
   ent->flags |= POWER;
 
-  setPowered(grid, x + 1, y);
-  setPowered(grid, x - 1, y);
-  setPowered(grid, x, y + 1);
-  setPowered(grid, x, y - 1);
+  set_powered(grid, x + 1, y);
+  set_powered(grid, x - 1, y);
+  set_powered(grid, x, y + 1);
+  set_powered(grid, x, y - 1);
 }
 
 int get_move_pos(entity* beast, entity* player, entity* grid[]) {
@@ -901,7 +915,10 @@ int get_move_pos(entity* beast, entity* player, entity* grid[]) {
     return to_pos(x, y);
 }
 
-void toggleFullScreen(SDL_Window *win) {
+
+// Generic Functions
+
+void toggle_fullscreen(SDL_Window *win) {
   Uint32 flags = SDL_GetWindowFlags(win);
   if ((flags & SDL_WINDOW_FULLSCREEN_DESKTOP) || (flags & SDL_WINDOW_FULLSCREEN))
     flags = 0;
@@ -912,16 +929,11 @@ void toggleFullScreen(SDL_Window *win) {
     error("Toggling fullscreen mode failed");
 }
 
-bool inBounds(int x, int y) {
-  return x >= 0 && x < num_blocks_w &&
-    y >= 0 && y < num_blocks_h;
-}
-
 double calc_dist(int x1, int y1, int x2, int y2) {
   return sqrt(pow(x1 - x2, 2) + pow(y1 - y2, 2));
 }
 
-int renderText(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size) {
+int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size) {
   int i;
   for (i = 0; str[i] != '\0'; ++i) {
     int code = str[i];
