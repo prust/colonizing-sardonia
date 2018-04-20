@@ -105,11 +105,28 @@ int max_turrets = 50;
 int max_bullets = 100;
 
 int main(int num_args, char* args[]) {
+  srand(time(NULL));
+  
+  // SDL setup
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
     error("initializing SDL");
 
-  srand(time(NULL));
+  SDL_Window *window;
+  window = SDL_CreateWindow("Beast", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, num_blocks_w * block_w, num_blocks_h * block_h, SDL_WINDOW_RESIZABLE);
+  if (!window)
+    error("creating window");
+  
+  toggle_fullscreen(window);
+  SDL_GetWindowSize(window, &vp.w, &vp.h);
 
+  SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+  if (!renderer)
+    error("creating renderer");
+
+  if (SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) < 0)
+    error("setting blend mode");
+
+  // load game
   grid_len = num_blocks_w * num_blocks_h;
   entity* grid[grid_len];
   byte grid_flags[grid_len];
@@ -202,20 +219,7 @@ int main(int num_args, char* args[]) {
   for (int i = 0; i < max_bullets; ++i)
     bullets[i].flags = DELETED;
 
-  SDL_Window *window;
-  window = SDL_CreateWindow("Beast", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, num_blocks_w * block_w, num_blocks_h * block_h, SDL_WINDOW_RESIZABLE);
-  if (!window)
-    error("creating window");
-
-  SDL_GetWindowSize(window, &vp.w, &vp.h);
-
-  SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-  if (!renderer)
-    error("creating renderer");
-
-  if (SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) < 0)
-    error("setting blend mode");
-
+  // game loop (incl. events, update & draw)
   bool is_gameover = false;
   int dir_x = 0;
   int dir_y = 0;
