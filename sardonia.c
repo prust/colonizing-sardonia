@@ -22,7 +22,6 @@ typedef unsigned char byte;
 #define ENCLOSED 0x2
 #define PROCESSED_BORDER 0x4
 #define POWERED 0x8
-#define WATER 0x10
 
 #define PICKING_UP 0
 #define PLACING 1
@@ -91,16 +90,7 @@ double bullet_speed = 300.0; // in px/sec
 int block_density_pct = 20;
 int starting_distance = 15;
 
-const int num_players = 2;
-entity players[num_players] = {{
-  .flags = PLAYER,
-  .x = 1,
-  .y = 1
-}, {
-  .flags = (PLAYER | DELETED),
-  .x = 2,
-  .y = 2
-}};
+entity player = {.flags = PLAYER, .x = 1, .y = 1};
 
 viewport vp = {
   .x = 0,
@@ -164,7 +154,7 @@ int main(int num_args, char* args[]) {
   }
 
   // set the position of the 1st player
-  set_pos(&players[0], grid, findAvailPos(grid));
+  set_pos(&player, grid, findAvailPos(grid));
 
   // additional 10 static blocks in the playing field
   for (int i = 0; i < 10; ++i) {
@@ -199,7 +189,7 @@ int main(int num_args, char* args[]) {
     int pos;
     do {
       pos = findAvailPos(grid);
-    } while (abs(players[0].x - to_x(pos)) < starting_distance && abs(players[0].y - to_y(pos)) < starting_distance);
+    } while (abs(player.x - to_x(pos)) < starting_distance && abs(player.y - to_y(pos)) < starting_distance);
 
     beasts[i].flags = BEAST;
     if (i == 0)
@@ -237,10 +227,8 @@ int main(int num_args, char* args[]) {
     error("setting blend mode");
 
   bool is_gameover = false;
-  int p1_dir_x = 0;
-  int p1_dir_y = 0;
-  int p2_dir_x = 0;
-  int p2_dir_y = 0;
+  int dir_x = 0;
+  int dir_y = 0;
   unsigned int last_loop_time = SDL_GetTicks();
   while (!is_gameover) {
     unsigned int curr_time = SDL_GetTicks();
@@ -327,116 +315,67 @@ int main(int num_args, char* args[]) {
           }
           break;
         case SDL_KEYDOWN:
-          p1_dir_x = 0;
-          p1_dir_y = 0;
-          p2_dir_x = 0;
-          p2_dir_y = 0;
+          dir_x = 0;
+          dir_y = 0;
           switch (evt.key.keysym.sym) {
             case SDLK_ESCAPE:
               is_gameover = true;
               break;
             case SDLK_LEFT:
-              p1_dir_x = -1;
+              dir_x = -1;
               break;
             case SDLK_RIGHT:
-              p1_dir_x = 1;
+              dir_x = 1;
               break;
             case SDLK_UP:
-              p1_dir_y = -1;
+              dir_y = -1;
               break;
             case SDLK_DOWN:
-              p1_dir_y = 1;
-              break;
-            case SDLK_a:
-              p2_dir_x = -1;
-              break;
-            case SDLK_d:
-              p2_dir_x = 1;
-              break;
-            case SDLK_s:
-              p2_dir_y = 1;
-              break;
-            case SDLK_w:
-              p2_dir_y = -1;
-              break;
-            case SDLK_MINUS:
-              if ((evt.key.keysym.mod & KMOD_LSHIFT) || (evt.key.keysym.mod & KMOD_RSHIFT)) {
-                block_w /= 2;
-                block_h /= 2;
-                vp.x = 0;
-                vp.y = 0;
-              }
-              break;
-            case SDLK_EQUALS:
-              if ((evt.key.keysym.mod & KMOD_LSHIFT) || (evt.key.keysym.mod & KMOD_RSHIFT)) {
-                block_w *= 2;
-                block_h *= 2;
-              }
+              dir_y = 1;
               break;
             case SDLK_f:
               toggleFullScreen(window);
               break;
-            case SDLK_2:
-              // hitting "2" will toggle the 2nd player
-              if (players[1].flags & DELETED)
-                set_pos(&players[1], grid, findAvailPos(grid));
-              else
-                remove_from_grid(&players[1], grid);
-
-              players[1].flags ^= DELETED; // toggle the bit
-              break;
           }
 
-          for (int i = 0; i < num_players; ++i) {
-            int dir_x, dir_y;
-            if (i == 0) {
-              dir_x = p1_dir_x;
-              dir_y = p1_dir_y;
-            }
-            else if (i == 1) {
-              dir_x = p2_dir_x;
-              dir_y = p2_dir_y;
+          if (dir_x || dir_y) {
+            int orig_x = player.x;
+            int orig_y = player.y;
+            int new_x = orig_x + dir_x;
+            int new_y = orig_y + dir_y;
+            entity* pushed_ent = NULL;
+            if (new_x >= 0 && new_x < num_blocks_w &&
+                new_y >= 0 && new_y < num_blocks_h) {
+              pushed_ent = grid[to_pos(new_x, new_y)];
             }
 
-            if ((dir_x || dir_y) && !(players[i].flags & DELETED)) {
-              int orig_x = players[i].x;
-              int orig_y = players[i].y;
-              int new_x = orig_x + dir_x;
-              int new_y = orig_y + dir_y;
-              entity* pushed_ent = NULL;
-              if (new_x >= 0 && new_x < num_blocks_w &&
-                  new_y >= 0 && new_y < num_blocks_h) {
-                pushed_ent = grid[to_pos(new_x, new_y)];
+            int num_blocks_pushed = push(grid, dir_x, dir_y, player.x, player.y);
+            if (num_blocks_pushed > -1) {
+              move(&player, grid, new_x, new_y);
+              if (num_blocks_pushed > 0 && pushed_ent) {
+                // check if previous enclosure was just broken
+                checkForEnclosures(grid, enclosures, pushed_ent->x - dir_x, pushed_ent->y - dir_y, false);
+                // check if we just expanded an enclosure
+                if (enclosures[to_pos(orig_x, orig_y)] & ENCLOSED)
+                  enclosures[to_pos(new_x, new_y)] |= ENCLOSED;
+
+                int final_x = new_x;
+                int final_y = new_y;
+                if (dir_x)
+                  final_x += num_blocks_pushed * dir_x;
+                else if (dir_y)
+                  final_y += num_blocks_pushed * dir_y;
+
+                // check the last pushed block to see if a new enclosure was just created
+                checkForEnclosures(grid, enclosures, final_x, final_y, true);
               }
-
-              int num_blocks_pushed = push(grid, dir_x, dir_y, players[i].x, players[i].y);
-              if (num_blocks_pushed > -1) {
-                move(&players[i], grid, new_x, new_y);
-                if (num_blocks_pushed > 0 && pushed_ent) {
-                  // check if previous enclosure was just broken
-                  checkForEnclosures(grid, enclosures, pushed_ent->x - dir_x, pushed_ent->y - dir_y, false);
-                  // check if we just expanded an enclosure
-                  if (enclosures[to_pos(orig_x, orig_y)] & ENCLOSED)
-                    enclosures[to_pos(new_x, new_y)] |= ENCLOSED;
-
-                  int final_x = new_x;
-                  int final_y = new_y;
-                  if (dir_x)
-                    final_x += num_blocks_pushed * dir_x;
-                  else if (dir_y)
-                    final_y += num_blocks_pushed * dir_y;
-
-                  // check the last pushed block to see if a new enclosure was just created
-                  checkForEnclosures(grid, enclosures, final_x, final_y, true);
-                }
-                
-                if (is_spacebar_pressed) {
-                  entity* ent_behind = grid[to_pos(orig_x - dir_x, orig_y - dir_y)];
-                  if (ent_behind && (ent_behind->flags & BLOCK) && !(ent_behind->flags & STATIC)) {
-                    move(ent_behind, grid, orig_x, orig_y);
-                    checkForEnclosures(grid, enclosures, orig_x - dir_x, orig_y - dir_y, false);
-                    checkForEnclosures(grid, enclosures, ent_behind->x, ent_behind->y, true);
-                  }
+              
+              if (is_spacebar_pressed) {
+                entity* ent_behind = grid[to_pos(orig_x - dir_x, orig_y - dir_y)];
+                if (ent_behind && (ent_behind->flags & BLOCK) && !(ent_behind->flags & STATIC)) {
+                  move(ent_behind, grid, orig_x, orig_y);
+                  checkForEnclosures(grid, enclosures, orig_x - dir_x, orig_y - dir_y, false);
+                  checkForEnclosures(grid, enclosures, ent_behind->x, ent_behind->y, true);
                 }
               }
             }
@@ -445,30 +384,25 @@ int main(int num_args, char* args[]) {
       }
     }
 
-    // shift the viewport if necessary, to include each player
-    for (int i = 0; i < num_players; ++i) {
-      if (players[i].flags & DELETED)
-        continue;
+    // shift the viewport if necessary, to include the player
+    int player_x = player.x * block_w;
+    int player_y = player.y * block_h;
+    int left_edge = vp.x;
+    int right_edge = vp.w + vp.x;
+    int top_edge = vp.y;
+    int bottom_edge = vp.h + vp.y;
+    int h_padding = 10 * block_w;
+    int v_padding = 10 * block_h;
 
-      int player_x = players[i].x * block_w;
-      int player_y = players[i].y * block_h;
-      int left_edge = vp.x;
-      int right_edge = vp.w + vp.x;
-      int top_edge = vp.y;
-      int bottom_edge = vp.h + vp.y;
-      int h_padding = 10 * block_w;
-      int v_padding = 10 * block_h;
-
-      // smooth viewport following (cuts the distance by a tenth each frame)
-      if (player_x > right_edge - h_padding)
-        vp.x += (player_x - (right_edge - h_padding)) / 10;
-      else if (player_x < left_edge + h_padding)
-        vp.x -= ((left_edge + h_padding) - player_x) / 10;
-      if (player_y > bottom_edge - v_padding)
-        vp.y += (player_y - (bottom_edge - v_padding)) / 10;
-      else if (player_y < top_edge + v_padding)
-        vp.y -= ((top_edge + v_padding) - player_y) / 10;
-    }
+    // smooth viewport following (cuts the distance by a tenth each frame)
+    if (player_x > right_edge - h_padding)
+      vp.x += (player_x - (right_edge - h_padding)) / 10;
+    else if (player_x < left_edge + h_padding)
+      vp.x -= ((left_edge + h_padding) - player_x) / 10;
+    if (player_y > bottom_edge - v_padding)
+      vp.y += (player_y - (bottom_edge - v_padding)) / 10;
+    else if (player_y < top_edge + v_padding)
+      vp.y -= ((top_edge + v_padding) - player_y) / 10;
 
     // set BG color
     if (SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255) < 0)
@@ -584,19 +518,14 @@ int main(int num_args, char* args[]) {
 
     if (SDL_SetRenderDrawColor(renderer, 140, 60, 140, 255) < 0)
       error("setting player color");
-    for (int i = 0; i < num_players; ++i) {
-      if (players[i].flags & DELETED)
-        continue;
-
-      SDL_Rect player_rect = {
-        .x = players[i].x * block_w - vp.x,
-        .y = players[i].y * block_h - vp.y,
-        .w = block_w,
-        .h = block_h
-      };
-      if (SDL_RenderFillRect(renderer, &player_rect) < 0)
-        error("filling rect");
-    }
+    SDL_Rect player_rect = {
+      .x = player.x * block_w - vp.x,
+      .y = player.y * block_h - vp.y,
+      .w = block_w,
+      .h = block_h
+    };
+    if (SDL_RenderFillRect(renderer, &player_rect) < 0)
+      error("filling rect");
 
     for (int i = 0; i < num_beasts; ++i) {
       if (beasts[i].flags & DELETED)
@@ -645,47 +574,6 @@ int main(int num_args, char* args[]) {
     char resource_str[24];
     snprintf(resource_str, sizeof(resource_str), "Mines: %d, Metal: %d", num_mines, num_collected_blocks);
     int x_pos = renderText(renderer, resource_str, 2, 2, text_px_size);
-
-    // draw darkness
-    // if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 50) < 0)
-    //   error("setting darkness color");
-    // for (int pos = 0; pos < grid_len; ++pos) {
-    //   int x = to_x(pos);
-    //   int y = to_y(pos);
-
-    //   if ((enclosures[pos] & ENCLOSED) ||
-    //     (inBounds(x + 1, y) && enclosures[to_pos(x + 1, y)] & ENCLOSED) ||
-    //     (inBounds(x + 1, y + 1) && enclosures[to_pos(x + 1, y + 1)] & ENCLOSED) ||
-    //     (inBounds(x, y + 1) && enclosures[to_pos(x, y + 1)] & ENCLOSED) ||
-    //     (inBounds(x - 1, y) && enclosures[to_pos(x - 1, y)] & ENCLOSED) ||
-    //     (inBounds(x - 1, y - 1) && enclosures[to_pos(x - 1, y - 1)] & ENCLOSED) ||
-    //     (inBounds(x, y - 1) && enclosures[to_pos(x, y - 1)] & ENCLOSED) ||
-    //     (inBounds(x + 1, y - 1) && enclosures[to_pos(x + 1, y - 1)] & ENCLOSED) ||
-    //     (inBounds(x - 1, y + 1) && enclosures[to_pos(x - 1, y + 1)] & ENCLOSED))
-    //     continue;
-
-    //   double dist = -1;
-    //   for (int i = 0; i < num_players; ++i) {
-    //     if (players[i].flags & DELETED)
-    //       continue;
-
-    //     double player_dist = calc_dist(x, y, players[i].x, players[i].y);
-    //     if (dist == -1 || player_dist < dist)
-    //       dist = player_dist;
-    //   }
-
-    //   if (dist > 10) {
-    //     SDL_Rect darkness = {
-    //       .x = x * block_w - vp.x,
-    //       .y = y * block_h - vp.y,
-    //       .w = block_w,
-    //       .h = block_h
-    //     };
-
-    //     if (SDL_RenderFillRect(renderer, &darkness) < 0)
-    //       error("filling darkness rect");
-    //   }
-    // }
 
     if (curr_time - last_fire_time >= mine_interval) {
       for (int i = 0; i < max_turrets; ++i) {
@@ -764,14 +652,14 @@ int main(int num_args, char* args[]) {
 
         int dir_x = 0;
         int dir_y = 0;
-        if (players[0].x < x)
+        if (player.x < x)
           dir_x = -1;
-        else if (players[0].x > x)
+        else if (player.x > x)
           dir_x = 1;
 
-        if (players[0].y < y)
+        if (player.y < y)
           dir_y = -1;
-        else if (players[0].y > y)
+        else if (player.y > y)
           dir_y = 1;
 
         bool found_direction = true;
@@ -782,15 +670,15 @@ int main(int num_args, char* args[]) {
         bool move_randomly = rand() % 100 > 75;
 
         // if the beast isn't within the attack distance, it should move randomly
-        double dist = calc_dist(players[0].x, players[0].y, beasts[i].x, beasts[i].y);
+        double dist = calc_dist(player.x, player.y, beasts[i].x, beasts[i].y);
         if (dist > attack_dist)
           move_randomly = true;
 
-        // the beast will "get" the players[0] on this move
-        if (abs(players[0].x - x) <= 1 && abs(players[0].y - y) <= 1) {
+        // the beast will "get" the player on this move
+        if (abs(player.x - x) <= 1 && abs(player.y - y) <= 1) {
           is_gameover = true;
-          x = players[0].x;
-          y = players[0].y;
+          x = player.x;
+          y = player.y;
         }
         // try to move towards the player, if possible
         else if (!move_randomly && dir_x && dir_y && !grid[to_pos(x + dir_x, y + dir_y)]) {
