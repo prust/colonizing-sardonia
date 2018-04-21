@@ -5,6 +5,7 @@
 #include <math.h>
 
 #include "SDL.h"
+#include "SDL_image.h"
 #include "font8x8_basic.h"
 
 typedef unsigned char byte;
@@ -30,14 +31,14 @@ typedef struct {
   byte health;
   int x;
   int y;
-} entity;
+} Entity;
 
 typedef struct {
   int x;
   int y;
   int w;
   int h;
-} viewport;
+} Viewport;
 
 typedef struct {
   byte flags;
@@ -45,33 +46,45 @@ typedef struct {
   double y;
   double dx;
   double dy;
-} bullet;
+} Bullet;
+
+typedef struct {
+  SDL_Texture* tex;
+  int x;
+  int y;
+  int w;
+  int h;
+} Image;
 
 // grid functions
-int find_avail_pos(entity* grid[]);
-void move(entity* ent, entity* grid[], int x, int y);
-void set_pos(entity* ent, entity* grid[], int pos);
-void set_xy(entity* ent, entity* grid[], int x, int y);
-void remove_from_grid(entity* ent, entity* grid[]);
+int find_avail_pos(Entity* grid[]);
+void move(Entity* ent, Entity* grid[], int x, int y);
+void set_pos(Entity* ent, Entity* grid[], int pos);
+void set_xy(Entity* ent, Entity* grid[], int x, int y);
+void remove_from_grid(Entity* ent, Entity* grid[]);
 int to_x(int ix);
 int to_y(int ix);
 int to_pos(int x, int y);
 bool is_in_grid(int x, int y);
 
 // game-specific functions
-bool is_next_to_wall(entity* beast, entity* grid[]);
-void beast_explode(entity* beast, entity* grid[]);
-entity* closest_entity(int x, int y, entity entities[], int num_entities);
-void del_entity(entity* ent, entity* grid[]);
-void update_powered_walls(entity* grid[], entity static_blocks[], int num_static_blocks);
-void set_powered(entity* grid[], int x, int y);
-int get_move_pos(entity* beast, entity* player, entity* grid[]);
+bool is_next_to_wall(Entity* beast, Entity* grid[]);
+void beast_explode(Entity* beast, Entity* grid[]);
+Entity* closest_entity(int x, int y, Entity entities[], int num_entities);
+void del_entity(Entity* ent, Entity* grid[]);
+void update_powered_walls(Entity* grid[], Entity static_blocks[], int num_static_blocks);
+void set_powered(Entity* grid[], int x, int y);
+int get_move_pos(Entity* beast, Entity* player, Entity* grid[]);
 
 // generic functions
 void toggle_fullscreen(SDL_Window *win);
 bool in_bounds(int x, int y);
 double calc_dist(int x1, int y1, int x2, int y2);
 int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size);
+Image load_img(SDL_Renderer* renderer, char* path);
+void render_img(SDL_Renderer* renderer, Image* img);
+void center_img(Image* img, Viewport* viewport);
+bool is_mouseover(Image* img, int x, int y);
 void error(char* activity);
 
 int block_w = 40;
@@ -82,9 +95,9 @@ double bullet_speed = 300.0; // in px/sec
 int block_density_pct = 20;
 int starting_distance = 15;
 
-entity player = {.flags = PLAYER, .x = 1, .y = 1};
+Entity player = {.flags = PLAYER, .x = 1, .y = 1};
 
-viewport vp = {
+Viewport vp = {
   .x = 0,
   .y = 0,
   .w = 0,
@@ -111,7 +124,7 @@ int main(int num_args, char* args[]) {
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
     error("initializing SDL");
 
-  SDL_Window *window;
+  SDL_Window* window;
   window = SDL_CreateWindow("Beast", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, num_blocks_w * block_w, num_blocks_h * block_h, SDL_WINDOW_RESIZABLE);
   if (!window)
     error("creating window");
@@ -126,9 +139,59 @@ int main(int num_args, char* args[]) {
   if (SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) < 0)
     error("setting blend mode");
 
+  SDL_Cursor* arrow_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
+  SDL_Cursor* hand_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
+
+  Image title_img = load_img(renderer, "images/title.png");
+  title_img.y = 50;
+  Image start_game_img = load_img(renderer, "images/start-game.png");
+  start_game_img.y = 500;
+  Image start_game_hover_img = load_img(renderer, "images/start-game-hover.png");
+  start_game_hover_img.y = 500;
+  Image hints_img = load_img(renderer, "images/hints.png");
+  hints_img.y = 500 + start_game_img.h + 50;
+  
+  center_img(&title_img, &vp);
+  center_img(&start_game_img, &vp);
+  center_img(&start_game_hover_img, &vp);
+  center_img(&hints_img, &vp);
+
+  SDL_Event evt;
+  bool has_pressed = false;
+  while (!has_pressed) {
+    while (SDL_PollEvent(&evt))
+      if (evt.type == SDL_MOUSEBUTTONDOWN && is_mouseover(&start_game_img, evt.button.x, evt.button.y))
+        has_pressed = true;
+
+    // set BG color
+    if (SDL_SetRenderDrawColor(renderer, 44, 34, 30, 255) < 0)
+      error("setting bg color");
+    if (SDL_RenderClear(renderer) < 0)
+      error("clearing renderer");
+    
+    int mouse_x, mouse_y;
+    SDL_GetMouseState(&mouse_x, &mouse_y);
+    
+    render_img(renderer, &title_img);
+    if (is_mouseover(&start_game_img, mouse_x, mouse_y)) {
+      render_img(renderer, &start_game_hover_img);
+      SDL_SetCursor(hand_cursor);
+    }
+    else {
+      render_img(renderer, &start_game_img);
+      SDL_SetCursor(arrow_cursor);
+    }
+    render_img(renderer, &hints_img);
+    
+    SDL_RenderPresent(renderer);
+    SDL_Delay(10);
+  }
+
+  SDL_SetCursor(arrow_cursor);
+
   // load game
   grid_len = num_blocks_w * num_blocks_h;
-  entity* grid[grid_len];
+  Entity* grid[grid_len];
   byte grid_flags[grid_len];
   for (int i = 0; i < grid_len; ++i) {
     grid[i] = NULL;
@@ -136,7 +199,7 @@ int main(int num_args, char* args[]) {
   }
 
   int num_static_blocks = num_blocks_w * 2 + (num_blocks_h - 2) * 2 + 10;
-  entity static_blocks[num_static_blocks];
+  Entity static_blocks[num_static_blocks];
   int ix = 0;
   for (int x = 0; x < num_blocks_w; ++x) {
     // top row
@@ -179,7 +242,7 @@ int main(int num_args, char* args[]) {
   // Doing x3 to go from 20% density to 60% due to the mines
   // really we should just have one object for every possible grid position...
   int num_blocks = grid_len * block_density_pct * 3 / 100;
-  entity blocks[num_blocks];
+  Entity blocks[num_blocks];
   for (int i = 0; i < num_blocks; ++i) {
     if (i < grid_len * block_density_pct / 100) {
       int pos = find_avail_pos(grid);
@@ -193,7 +256,7 @@ int main(int num_args, char* args[]) {
     }
   }
 
-  entity beasts[num_beasts];
+  Entity beasts[num_beasts];
   for (int i = 0; i < num_beasts; ++i) {
     int pos;
     do {
@@ -211,11 +274,11 @@ int main(int num_args, char* args[]) {
   }
 
   // precreate all turrets "blocks" as deleted
-  entity turrets[max_turrets];
+  Entity turrets[max_turrets];
   for (int i = 0; i < max_turrets; ++i)
     turrets[i].flags = BLOCK | TURRET | DELETED;
 
-  bullet bullets[max_bullets];
+  Bullet bullets[max_bullets];
   for (int i = 0; i < max_bullets; ++i)
     bullets[i].flags = DELETED;
 
@@ -344,7 +407,7 @@ int main(int num_args, char* args[]) {
       }
     }
 
-    // shift the viewport if necessary, to include the player
+    // shift the Viewport if necessary, to include the player
     int player_x = player.x * block_w;
     int player_y = player.y * block_h;
     int left_edge = vp.x;
@@ -354,7 +417,7 @@ int main(int num_args, char* args[]) {
     int h_padding = 10 * block_w;
     int v_padding = 10 * block_h;
 
-    // smooth viewport following (cuts the distance by a tenth each frame)
+    // smooth Viewport following (cuts the distance by a tenth each frame)
     if (player_x > right_edge - h_padding)
       vp.x += (player_x - (right_edge - h_padding)) / 10;
     else if (player_x < left_edge + h_padding)
@@ -429,7 +492,7 @@ int main(int num_args, char* args[]) {
     }
 
     if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255) < 0)
-      error("setting bullet color");
+      error("setting Bullet color");
     for (int i = 0; i < max_bullets; ++i) {
       if (bullets[i].flags & DELETED)
         continue;
@@ -448,13 +511,13 @@ int main(int num_args, char* args[]) {
       int grid_y = bullets[i].y / block_h;
       if (is_in_grid(grid_x, grid_y)) {
         int pos = to_pos(grid_x, grid_y);
-        entity* ent = grid[pos];
+        Entity* ent = grid[pos];
         if (ent && ent->flags & BLOCK) {
           bullets[i].flags |= DELETED;
           continue;
         }
         else if (ent && ent->flags & BEAST) {
-          // if it's a super bullet or NOT a super-beast, "kill the beast!"
+          // if it's a super Bullet or NOT a super-beast, "kill the beast!"
           if (bullets[i].flags & SUPER || !(ent->flags & SUPER)) {
             ent->health--;
             if (!ent->health)
@@ -537,7 +600,7 @@ int main(int num_args, char* args[]) {
 
     if (curr_time - last_fire_time >= mine_interval) {
       for (int i = 0; i < max_turrets; ++i) {
-        entity* turret = &turrets[i];
+        Entity* turret = &turrets[i];
         if (!(turret->flags & DELETED))
           num_collected_blocks++;
       }
@@ -546,7 +609,7 @@ int main(int num_args, char* args[]) {
 
     // if (curr_time - last_fire_time >= turret_fire_interval) {
     //   for (int i = 0; i < max_turrets; ++i) {
-    //     entity* turret = &turrets[i];
+    //     Entity* turret = &turrets[i];
     //     if (turret->flags & DELETED)
     //       continue;
 
@@ -555,14 +618,14 @@ int main(int num_args, char* args[]) {
     //     if (!(turret->flags & POWER))
     //       continue;
 
-    //     entity* beast = closest_entity(turret->x, turret->y, beasts, num_beasts);
+    //     Entity* beast = closest_entity(turret->x, turret->y, beasts, num_beasts);
     //     if (beast) {
     //       double dist = calc_dist(beast->x, beast->y, turret->x, turret->y);
     //       // dividing by the distance gives us a normalized 1-unit vector
     //       double dx = (beast->x - turret->x) / dist;
     //       double dy = (beast->y - turret->y) / dist;
     //       for (int j = 0; j < max_bullets; ++j) {
-    //         bullet* b = &bullets[j];
+    //         Bullet* b = &bullets[j];
     //         if (b->flags & DELETED) {
     //           b->flags &= (~DELETED); // clear the DELETED bit
 
@@ -625,6 +688,10 @@ int main(int num_args, char* args[]) {
     SDL_Delay(10);
   }
 
+  if (SDL_SetWindowFullscreen(window, 0) < 0)
+    error("exiting fullscreen");
+  SDL_FreeCursor(arrow_cursor);
+  SDL_FreeCursor(hand_cursor);
   SDL_DestroyWindow(window);
   SDL_Quit();
   return 0;
@@ -637,7 +704,7 @@ bool in_bounds(int x, int y) {
     y >= 0 && y < num_blocks_h;
 }
 
-int find_avail_pos(entity* grid[]) {
+int find_avail_pos(Entity* grid[]) {
   int x;
   int y;
   int pos;
@@ -649,22 +716,22 @@ int find_avail_pos(entity* grid[]) {
   return pos;
 }
 
-void move(entity* ent, entity* grid[], int x, int y) {
+void move(Entity* ent, Entity* grid[], int x, int y) {
   remove_from_grid(ent, grid);
   set_xy(ent, grid, x, y);
 }
 
-void set_pos(entity* ent, entity* grid[], int pos) {
+void set_pos(Entity* ent, Entity* grid[], int pos) {
   set_xy(ent, grid, to_x(pos), to_y(pos));
 }
 
-void set_xy(entity* ent, entity* grid[], int x, int y) {
+void set_xy(Entity* ent, Entity* grid[], int x, int y) {
   ent->x = x;
   ent->y = y;
   grid[to_pos(x, y)] = ent;
 }
 
-void remove_from_grid(entity* ent, entity* grid[]) {
+void remove_from_grid(Entity* ent, Entity* grid[]) {
   int prev_pos = to_pos(ent->x, ent->y);
   grid[prev_pos] = NULL;
 }
@@ -697,7 +764,7 @@ bool is_in_grid(int x, int y) {
 
 // Game-Specific Functions
 
-bool is_next_to_wall(entity* beast, entity* grid[]) {
+bool is_next_to_wall(Entity* beast, Entity* grid[]) {
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
     for (int dir_y = -1; dir_y <= 1; ++dir_y) {
       // check the bounds
@@ -714,7 +781,7 @@ bool is_next_to_wall(entity* beast, entity* grid[]) {
   return false;
 }
 
-void beast_explode(entity* beast, entity* grid[]) {
+void beast_explode(Entity* beast, Entity* grid[]) {
   int x = beast->x;
   int y = beast->y;
 
@@ -730,15 +797,15 @@ void beast_explode(entity* beast, entity* grid[]) {
         continue;
 
       int pos = to_pos(new_x, new_y);
-      entity* ent = grid[pos];
+      Entity* ent = grid[pos];
       if (ent && ent->flags & BLOCK && !(ent->flags & STATIC))
         del_entity(ent, grid);
     }
   }
 }
 
-entity* closest_entity(int x, int y, entity entities[], int num_entities) {
-  entity* winner = NULL;
+Entity* closest_entity(int x, int y, Entity entities[], int num_entities) {
+  Entity* winner = NULL;
   double winner_dist = -1;
   
   for (int i = 0; i < num_entities; ++i) {
@@ -754,13 +821,13 @@ entity* closest_entity(int x, int y, entity entities[], int num_entities) {
   return winner;
 }
 
-void del_entity(entity* ent, entity* grid[]) {
+void del_entity(Entity* ent, Entity* grid[]) {
   ent->flags |= DELETED; // flip DELETED bit on
   ent->flags &= (~POWER); // clear POWER flag since the block will be re-used
   remove_from_grid(ent, grid);
 }
 
-void update_powered_walls(entity* grid[], entity static_blocks[], int num_static_blocks) {
+void update_powered_walls(Entity* grid[], Entity static_blocks[], int num_static_blocks) {
   // clear POWER bit everywhere on the grid
   for (int i = 0; i < grid_len; ++i)
     if (grid[i] && grid[i]->flags & POWER)
@@ -779,11 +846,11 @@ void update_powered_walls(entity* grid[], entity static_blocks[], int num_static
   }
 }
 
-void set_powered(entity* grid[], int x, int y) {
+void set_powered(Entity* grid[], int x, int y) {
   if (!is_in_grid(x, y))
     return;
 
-  entity* ent = grid[to_pos(x, y)];
+  Entity* ent = grid[to_pos(x, y)];
   if (!ent || !(ent->flags & BLOCK) || ent->flags & POWER)
     return;
 
@@ -795,7 +862,7 @@ void set_powered(entity* grid[], int x, int y) {
   set_powered(grid, x, y - 1);
 }
 
-int get_move_pos(entity* beast, entity* player, entity* grid[]) {
+int get_move_pos(Entity* beast, Entity* player, Entity* grid[]) {
   int x = beast->x;
   int y = beast->y;
 
@@ -969,6 +1036,32 @@ int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, 
 
   // width of total text string
   return i * size * 8;
+}
+
+// TODO: it's probably a little more efficient to load the image into an sdl image
+// then get the dimensions, then load it into a texture
+// instead of loading it directly to a texture & then querying the texture...
+Image load_img(SDL_Renderer* renderer, char* path) {
+  Image img = {};
+  img.tex = IMG_LoadTexture(renderer, path);
+  SDL_QueryTexture(img.tex, NULL, NULL, &img.w, &img.h);
+  return img;
+}
+
+void render_img(SDL_Renderer* renderer, Image* img) {
+  SDL_Rect r = {.x = img->x, .y = img->y, .w = img->w, .h = img->h};
+  if (SDL_RenderCopy(renderer, img->tex, NULL, &r) < 0)
+    error("renderCopy");
+}
+
+// centers the image horizontally in the viewport
+void center_img(Image* img, Viewport* viewport) {
+  img->x = viewport->w / 2 - img->w / 2;
+}
+
+bool is_mouseover(Image* img, int x, int y) {
+  return x >= img->x && x <= (img->x + img->w) &&
+    y >= img->y && y <= (img->y + img->h);
 }
 
 void error(char* activity) {
