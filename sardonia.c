@@ -136,7 +136,7 @@ int main(int num_args, char* args[]) {
   if (!window)
     error("creating window");
   
-  toggle_fullscreen(window);
+  // toggle_fullscreen(window);
   SDL_GetWindowSize(window, &vp.w, &vp.h);
 
   SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
@@ -200,8 +200,8 @@ int main(int num_args, char* args[]) {
     SDL_Delay(10);
   }
 
-  if (SDL_SetWindowFullscreen(window, 0) < 0)
-    error("exiting fullscreen");
+  // if (SDL_SetWindowFullscreen(window, 0) < 0)
+  //   error("exiting fullscreen");
 
   SDL_FreeCursor(arrow_cursor);
   SDL_FreeCursor(hand_cursor);
