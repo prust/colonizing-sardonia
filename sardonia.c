@@ -120,7 +120,7 @@ int max_beasts = 10;
 int max_turrets = 50;
 int max_bullets = 100;
 int max_blocks;
-int max_static_blocks;
+int max_static_blocks = 10;
 
 // top level (title screen)
 int main(int num_args, char* args[]) {
@@ -220,8 +220,7 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
   num_collected_blocks = 250;
   grid_len = num_blocks_w * num_blocks_h;
   max_blocks = grid_len * block_density_pct * 3 / 100; // x3 b/c default is 20% density, but we need up to 60% due to mines
-  max_static_blocks = num_blocks_w * 2 + (num_blocks_h - 2) * 2 + 10;
-
+  
   // load game
   Entity* grid[grid_len];
   byte grid_flags[grid_len];
@@ -305,40 +304,14 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity static_bloc
     grid[i] = NULL;
     grid_flags[i] = 0;
   }
-  
-  int ix = 0;
-  for (int x = 0; x < num_blocks_w; ++x) {
-    // top row
-    static_blocks[ix].flags = (BLOCK | STATIC);
-    set_xy(&static_blocks[ix], grid, x, 0);
-    ix++;
 
-    // bottom row
-    static_blocks[ix].flags = (BLOCK | STATIC);
-    set_xy(&static_blocks[ix], grid, x, num_blocks_h - 1);
-    ix++;
-  }
-
-  for (int y = 1; y < num_blocks_h - 1; ++y) {
-    // left row
-    static_blocks[ix].flags = (BLOCK | STATIC);
-    set_xy(&static_blocks[ix], grid, 0, y);
-    ix++;
-
-    // right row
-    static_blocks[ix].flags = (BLOCK | STATIC);
-    set_xy(&static_blocks[ix], grid, num_blocks_w - 1, y);
-    ix++;
-  }
-
-  // additional 10 static blocks in the playing field
-  for (int i = 0; i < 10; ++i) {
+  // add static blocks (power stones) to the playing field
+  for (int i = 0; i < max_static_blocks; ++i) {
     int pos = find_avail_pos(grid);
-    static_blocks[ix].flags = (BLOCK | STATIC);
-    static_blocks[ix].x = to_x(pos);
-    static_blocks[ix].y = to_y(pos);
-    grid[pos] = &static_blocks[ix];
-    ix++;
+    static_blocks[i].flags = (BLOCK | STATIC);
+    static_blocks[i].x = to_x(pos);
+    static_blocks[i].y = to_y(pos);
+    grid[pos] = &static_blocks[i];
   }
 
   for (int i = 0; i < max_blocks; ++i) {
@@ -578,15 +551,8 @@ void render(SDL_Renderer* renderer, SDL_Texture* sprites, Entity blocks[], Entit
     render_sprite(renderer, sprites, 1,1, blocks[i].x,blocks[i].y);
   }
 
-
-  for (int i = 0; i < max_static_blocks; ++i) {
-    // don't render border blocks
-    if (static_blocks[i].x == 0 || static_blocks[i].x == num_blocks_w - 1 ||
-      static_blocks[i].y == 0 || static_blocks[i].y == num_blocks_h - 1)
-      continue;
-
+  for (int i = 0; i < max_static_blocks; ++i)
     render_sprite(renderer, sprites, 1,0, static_blocks[i].x,static_blocks[i].y);
-  }
 
   for (int i = 0; i < max_turrets; ++i) {
     if (turrets[i].flags & DELETED)
