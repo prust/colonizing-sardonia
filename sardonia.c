@@ -14,7 +14,7 @@ typedef unsigned char byte;
 #define BLOCK 0x2
 #define BEAST 0x4
 #define PLAYER 0x8
-#define STATIC 0x10
+#define STONE 0x10
 #define TURRET 0x20
 #define POWER 0x40
 #define SUPER 0x80
@@ -62,18 +62,18 @@ bool is_in_grid(int x, int y);
 
 // game-specific functions
 void play_level(SDL_Window* window, SDL_Renderer* renderer);
-void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity static_blocks[], Entity beasts[], Entity turrets[], Bullet bullets[]);
-void on_mousemove(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity static_blocks[]);
-void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity static_blocks[]);
+void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity beasts[], Entity turrets[], Bullet bullets[]);
+void on_mousemove(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power_stones[]);
+void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power_stones[]);
 void on_keydown(SDL_Event* evt, Entity* grid[], bool* is_gameover, bool* is_paused, SDL_Window* window);
 void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Bullet bullets[]);
-void render(SDL_Renderer* renderer, SDL_Texture* sprites, Entity blocks[], Entity static_blocks[], Entity turrets[], Entity beasts[], Bullet bullets[]);
+void render(SDL_Renderer* renderer, SDL_Texture* sprites, Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]);
 
 bool is_next_to_wall(Entity* beast, Entity* grid[]);
 void beast_explode(Entity* beast, Entity* grid[]);
 Entity* closest_entity(int x, int y, Entity entities[], int num_entities);
 void del_entity(Entity* ent, Entity* grid[]);
-void update_powered_turrets(Entity* grid[], Entity static_blocks[]);
+void update_powered_turrets(Entity* grid[], Entity power_stones[]);
 void set_powered(Entity* grid[], int x, int y);
 int get_move_pos(Entity* beast, Entity turrets[], Entity* grid[]);
 
@@ -120,7 +120,7 @@ int max_beasts = 10;
 int max_turrets = 50;
 int max_bullets = 100;
 int max_blocks;
-int max_static_blocks = 10;
+int max_power_stones = 10;
 
 // top level (title screen)
 int main(int num_args, char* args[]) {
@@ -226,13 +226,13 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
   byte grid_flags[grid_len];
 
   Entity blocks[max_blocks];
-  Entity static_blocks[max_static_blocks];
+  Entity power_stones[max_power_stones];
   Entity beasts[max_beasts];
   Entity turrets[max_turrets];
   
   Bullet bullets[max_bullets];
 
-  load(grid, grid_flags, blocks, static_blocks, beasts, turrets, bullets);
+  load(grid, grid_flags, blocks, power_stones, beasts, turrets, bullets);
 
   SDL_Texture* sprites = IMG_LoadTexture(renderer, "images/spritesheet.png");
 
@@ -279,10 +279,10 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
             SDL_GetWindowSize(window, &vp.w, &vp.h);
           break;
         case SDL_MOUSEMOTION:
-          on_mousemove(&evt, grid, turrets, static_blocks);
+          on_mousemove(&evt, grid, turrets, power_stones);
           break;
         case SDL_MOUSEBUTTONDOWN:
-          on_mousedown(&evt, grid, turrets, static_blocks);
+          on_mousedown(&evt, grid, turrets, power_stones);
           break;
         case SDL_KEYDOWN:
           on_keydown(&evt, grid, &is_gameover, &is_paused, window);
@@ -291,7 +291,7 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
     }
 
     update(dt, curr_time, grid, turrets, beasts, bullets);
-    render(renderer, sprites, blocks, static_blocks, turrets, beasts, bullets);
+    render(renderer, sprites, blocks, power_stones, turrets, beasts, bullets);
 
     SDL_Delay(10);
   }
@@ -299,19 +299,19 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
   SDL_DestroyTexture(sprites);
 }
 
-void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity static_blocks[], Entity beasts[], Entity turrets[], Bullet bullets[]) {
+void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity beasts[], Entity turrets[], Bullet bullets[]) {
   for (int i = 0; i < grid_len; ++i) {
     grid[i] = NULL;
     grid_flags[i] = 0;
   }
 
-  // add static blocks (power stones) to the playing field
-  for (int i = 0; i < max_static_blocks; ++i) {
+  // add power stones to the playing field
+  for (int i = 0; i < max_power_stones; ++i) {
     int pos = find_avail_pos(grid);
-    static_blocks[i].flags = (BLOCK | STATIC);
-    static_blocks[i].x = to_x(pos);
-    static_blocks[i].y = to_y(pos);
-    grid[pos] = &static_blocks[i];
+    power_stones[i].flags = (BLOCK | STONE);
+    power_stones[i].x = to_x(pos);
+    power_stones[i].y = to_y(pos);
+    grid[pos] = &power_stones[i];
   }
 
   for (int i = 0; i < max_blocks; ++i) {
@@ -348,7 +348,7 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity static_bloc
 }
 
 // TODO: fix major DRY violation btwn mousemove & mousedown
-void on_mousemove(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity static_blocks[]) {
+void on_mousemove(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power_stones[]) {
   if (!(evt->motion.state & SDL_BUTTON_LMASK))
     return;
 
@@ -369,14 +369,14 @@ void on_mousemove(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity stati
       num_collected_blocks -= num_required_blocks;
       turrets[i].flags &= (~DELETED); // clear deleted bit
       set_xy(&turrets[i], grid, x, y);
-      update_powered_turrets(grid, static_blocks);
+      update_powered_turrets(grid, power_stones);
       break;
     }
   }
   // TODO: determine if max_turrets has been reached & alert the player
 }
 
-void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity static_blocks[]) {
+void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power_stones[]) {
   int x = (evt->button.x + vp.x) / block_w;
   int y = (evt->button.y + vp.y) / block_h;
   int pos = to_pos(x, y);
@@ -394,7 +394,7 @@ void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity stati
       num_collected_blocks -= num_required_blocks;
       turrets[i].flags &= (~DELETED); // clear deleted bit
       set_xy(&turrets[i], grid, x, y);
-      update_powered_turrets(grid, static_blocks);
+      update_powered_turrets(grid, power_stones);
       break;
     }
   }
@@ -537,7 +537,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
   }
 }
 
-void render(SDL_Renderer* renderer, SDL_Texture* sprites, Entity blocks[], Entity static_blocks[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
+void render(SDL_Renderer* renderer, SDL_Texture* sprites, Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
   // set BG color
   if (SDL_SetRenderDrawColor(renderer, 145, 103, 47, 255) < 0)
     error("setting bg color");
@@ -551,8 +551,8 @@ void render(SDL_Renderer* renderer, SDL_Texture* sprites, Entity blocks[], Entit
     render_sprite(renderer, sprites, 1,1, blocks[i].x,blocks[i].y);
   }
 
-  for (int i = 0; i < max_static_blocks; ++i)
-    render_sprite(renderer, sprites, 1,0, static_blocks[i].x,static_blocks[i].y);
+  for (int i = 0; i < max_power_stones; ++i)
+    render_sprite(renderer, sprites, 1,0, power_stones[i].x,power_stones[i].y);
 
   for (int i = 0; i < max_turrets; ++i) {
     if (turrets[i].flags & DELETED)
@@ -722,7 +722,7 @@ void beast_explode(Entity* beast, Entity* grid[]) {
 
       int pos = to_pos(new_x, new_y);
       Entity* ent = grid[pos];
-      if (ent && ent->flags & BLOCK && !(ent->flags & STATIC))
+      if (ent && ent->flags & BLOCK && !(ent->flags & STONE))
         del_entity(ent, grid);
     }
   }
@@ -751,20 +751,15 @@ void del_entity(Entity* ent, Entity* grid[]) {
   remove_from_grid(ent, grid);
 }
 
-void update_powered_turrets(Entity* grid[], Entity static_blocks[]) {
+void update_powered_turrets(Entity* grid[], Entity power_stones[]) {
   // clear POWER bit everywhere on the grid
   for (int i = 0; i < grid_len; ++i)
     if (grid[i] && grid[i]->flags & POWER)
       grid[i]->flags &= (~POWER);
 
-  for (int i = 0; i < max_static_blocks; ++i) {
-    int x = static_blocks[i].x;
-    int y = static_blocks[i].y;
-    
-    // skip rows of static blocks around edges
-    if (x == 0 || x == num_blocks_w - 1 ||
-      y == 0 || y == num_blocks_h - 1)
-        continue;
+  for (int i = 0; i < max_power_stones; ++i) {
+    int x = power_stones[i].x;
+    int y = power_stones[i].y;
 
     set_powered(grid, x, y);
   }
@@ -778,7 +773,7 @@ void set_powered(Entity* grid[], int x, int y) {
   if (!ent || !(ent->flags & BLOCK) || ent->flags & POWER)
     return;
 
-  if (!(ent->flags & TURRET) && !(ent->flags & STATIC))
+  if (!(ent->flags & TURRET) && !(ent->flags & STONE))
     return;
 
   ent->flags |= POWER;
