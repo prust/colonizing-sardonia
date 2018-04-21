@@ -66,16 +66,16 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity static_bloc
 void on_mousemove(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity static_blocks[]);
 void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity static_blocks[]);
 void on_keydown(SDL_Event* evt, Entity* grid[], bool* is_gameover, bool* is_paused, SDL_Window* window);
-void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Bullet bullets[], bool* is_gameover);
-void render(SDL_Renderer* renderer, Entity blocks[], Entity static_blocks[], Entity turrets[], Entity beasts[], Bullet bullets[]);
+void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Bullet bullets[]);
+void render(SDL_Renderer* renderer, SDL_Texture* sprites, Entity blocks[], Entity static_blocks[], Entity turrets[], Entity beasts[], Bullet bullets[]);
 
 bool is_next_to_wall(Entity* beast, Entity* grid[]);
 void beast_explode(Entity* beast, Entity* grid[]);
 Entity* closest_entity(int x, int y, Entity entities[], int num_entities);
 void del_entity(Entity* ent, Entity* grid[]);
-void update_powered_walls(Entity* grid[], Entity static_blocks[], int max_static_blocks);
+void update_powered_turrets(Entity* grid[], Entity static_blocks[]);
 void set_powered(Entity* grid[], int x, int y);
-int get_move_pos(Entity* beast, Entity* player, Entity* grid[]);
+int get_move_pos(Entity* beast, Entity turrets[], Entity* grid[]);
 
 // generic functions
 void toggle_fullscreen(SDL_Window *win);
@@ -85,11 +85,11 @@ int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, 
 Image load_img(SDL_Renderer* renderer, char* path);
 void render_img(SDL_Renderer* renderer, Image* img);
 void center_img(Image* img, Viewport* viewport);
+void render_sprite(SDL_Renderer* renderer, SDL_Texture* sprites, int src_x, int src_y, int dest_x, int dest_y);
 bool is_mouseover(Image* img, int x, int y);
 void error(char* activity);
 
 // game globals
-Entity player = {.flags = PLAYER, .x = 1, .y = 1};
 Viewport vp = {};
 
 int num_collected_blocks;
@@ -105,7 +105,6 @@ int bullet_w = 4;
 int bullet_h = 4;
 double bullet_speed = 300.0; // in px/sec
 int block_density_pct = 20;
-int starting_distance = 15;
 
 int num_blocks_w = 40 * 3;
 int num_blocks_h = 30 * 3;
@@ -167,7 +166,7 @@ int main(int num_args, char* args[]) {
   bool exit_game = false;
   while (!exit_game) {
     while (SDL_PollEvent(&evt)) {
-      if (evt.type == SDL_KEYDOWN && evt.key.keysym.sym == SDLK_ESCAPE) {
+      if (evt.type == SDL_QUIT || (evt.type == SDL_KEYDOWN && evt.key.keysym.sym == SDLK_ESCAPE)) {
         exit_game = true;
       }
       else if (evt.type == SDL_MOUSEBUTTONDOWN && is_mouseover(&start_game_img, evt.button.x, evt.button.y)) {
@@ -218,7 +217,7 @@ int main(int num_args, char* args[]) {
 
 void play_level(SDL_Window* window, SDL_Renderer* renderer) {
   // reset global variables
-  num_collected_blocks = 100;
+  num_collected_blocks = 250;
   grid_len = num_blocks_w * num_blocks_h;
   max_blocks = grid_len * block_density_pct * 3 / 100; // x3 b/c default is 20% density, but we need up to 60% due to mines
   max_static_blocks = num_blocks_w * 2 + (num_blocks_h - 2) * 2 + 10;
@@ -235,6 +234,8 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
   Bullet bullets[max_bullets];
 
   load(grid, grid_flags, blocks, static_blocks, beasts, turrets, bullets);
+
+  SDL_Texture* sprites = IMG_LoadTexture(renderer, "images/spritesheet.png");
 
   // game loop (incl. events, update & draw)
   bool is_gameover = false;
@@ -290,11 +291,13 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
       }
     }
 
-    update(dt, curr_time, grid, turrets, beasts, bullets, &is_gameover);
-    render(renderer, blocks, static_blocks, turrets, beasts, bullets);
+    update(dt, curr_time, grid, turrets, beasts, bullets);
+    render(renderer, sprites, blocks, static_blocks, turrets, beasts, bullets);
 
     SDL_Delay(10);
   }
+
+  SDL_DestroyTexture(sprites);
 }
 
 void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity static_blocks[], Entity beasts[], Entity turrets[], Bullet bullets[]) {
@@ -338,9 +341,6 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity static_bloc
     ix++;
   }
 
-  // set the position of the 1st player
-  set_pos(&player, grid, find_avail_pos(grid));
-
   for (int i = 0; i < max_blocks; ++i) {
     if (i < grid_len * block_density_pct / 100) {
       int pos = find_avail_pos(grid);
@@ -355,15 +355,11 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity static_bloc
   }
 
   for (int i = 0; i < max_beasts; ++i) {
-    int pos;
-    do {
-      pos = find_avail_pos(grid);
-    } while (abs(player.x - to_x(pos)) < starting_distance && abs(player.y - to_y(pos)) < starting_distance);
-
     beasts[i].flags = BEAST;
     if (i == 0)
       beasts[i].flags |= SUPER;
 
+    int pos = find_avail_pos(grid);
     beasts[i].x = to_x(pos);
     beasts[i].y = to_y(pos);
     beasts[i].health = beast_health;
@@ -400,7 +396,7 @@ void on_mousemove(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity stati
       num_collected_blocks -= num_required_blocks;
       turrets[i].flags &= (~DELETED); // clear deleted bit
       set_xy(&turrets[i], grid, x, y);
-      update_powered_walls(grid, static_blocks, max_static_blocks);
+      update_powered_turrets(grid, static_blocks);
       break;
     }
   }
@@ -425,7 +421,7 @@ void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity stati
       num_collected_blocks -= num_required_blocks;
       turrets[i].flags &= (~DELETED); // clear deleted bit
       set_xy(&turrets[i], grid, x, y);
-      update_powered_walls(grid, static_blocks, max_static_blocks);
+      update_powered_turrets(grid, static_blocks);
       break;
     }
   }
@@ -433,23 +429,9 @@ void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity stati
 }
 
 void on_keydown(SDL_Event* evt, Entity* grid[], bool* is_gameover, bool* is_paused, SDL_Window* window) {
-  int dir_x = 0;
-  int dir_y = 0;
   switch (evt->key.keysym.sym) {
     case SDLK_ESCAPE:
       *is_gameover = true;
-      break;
-    case SDLK_LEFT:
-      dir_x = -1;
-      break;
-    case SDLK_RIGHT:
-      dir_x = 1;
-      break;
-    case SDLK_UP:
-      dir_y = -1;
-      break;
-    case SDLK_DOWN:
-      dir_y = 1;
       break;
     case SDLK_f:
       toggle_fullscreen(window);
@@ -458,32 +440,9 @@ void on_keydown(SDL_Event* evt, Entity* grid[], bool* is_gameover, bool* is_paus
       *is_paused = !*is_paused;
       break;
   }
-
-  if ((dir_x || dir_y) && !grid[to_pos(player.x + dir_x, player.y + dir_y)])
-    move(&player, grid, player.x + dir_x, player.y + dir_y);
 }
 
-void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Bullet bullets[], bool* is_gameover) {
-  // shift the Viewport if necessary, to include the player
-  int player_x = player.x * block_w;
-  int player_y = player.y * block_h;
-  int left_edge = vp.x;
-  int right_edge = vp.w + vp.x;
-  int top_edge = vp.y;
-  int bottom_edge = vp.h + vp.y;
-  int h_padding = 10 * block_w;
-  int v_padding = 10 * block_h;
-
-  // smooth Viewport following (cuts the distance by a tenth each frame)
-  if (player_x > right_edge - h_padding)
-    vp.x += (player_x - (right_edge - h_padding)) / 10;
-  else if (player_x < left_edge + h_padding)
-    vp.x -= ((left_edge + h_padding) - player_x) / 10;
-  if (player_y > bottom_edge - v_padding)
-    vp.y += (player_y - (bottom_edge - v_padding)) / 10;
-  else if (player_y < top_edge + v_padding)
-    vp.y -= ((top_edge + v_padding) - player_y) / 10;
-
+void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
   // turret firing
   if (curr_time - last_fire_time >= mine_interval) {
     for (int i = 0; i < max_turrets; ++i) {
@@ -558,16 +517,13 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
         }
       }
 
-      int dest_pos = get_move_pos(&beasts[i], &player, grid);
+      int dest_pos = get_move_pos(&beasts[i], turrets, grid);
 
       // if the beast is surrounded by blocks & has nowhere to move, it blows up
       if (dest_pos == -1)
         beast_explode(&beasts[i], grid);
       else
         move(&beasts[i], grid, to_x(dest_pos), to_y(dest_pos));
-      
-      if (beasts[i].x == player.x && beasts[i].y == player.y)
-        *is_gameover = true;
     }
     last_move_time = curr_time;
   }
@@ -608,9 +564,9 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
   }
 }
 
-void render(SDL_Renderer* renderer, Entity blocks[], Entity static_blocks[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
+void render(SDL_Renderer* renderer, SDL_Texture* sprites, Entity blocks[], Entity static_blocks[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
   // set BG color
-  if (SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255) < 0)
+  if (SDL_SetRenderDrawColor(renderer, 145, 103, 47, 255) < 0)
     error("setting bg color");
   if (SDL_RenderClear(renderer) < 0)
     error("clearing renderer");
@@ -619,58 +575,27 @@ void render(SDL_Renderer* renderer, Entity blocks[], Entity static_blocks[], Ent
     if (blocks[i].flags & DELETED)
       continue;
 
-    if (blocks[i].flags & POWER) {
-      if (SDL_SetRenderDrawColor(renderer, 170, 160, 120, 255) < 0)
-        error("setting powered border color");
-    }
-    else {
-      if (SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255) < 0)
-        error("setting block color");
-    }
-
-    SDL_Rect r = {
-      .x = blocks[i].x * block_w - vp.x,
-      .y = blocks[i].y * block_h - vp.y,
-      .w = block_w,
-      .h = block_h
-    };
-    if (SDL_RenderFillRect(renderer, &r) < 0)
-      error("drawing block");
+    render_sprite(renderer, sprites, 1,1, blocks[i].x,blocks[i].y);
   }
 
-  if (SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255) < 0)
-    error("setting static block color");
 
   for (int i = 0; i < max_static_blocks; ++i) {
-    // don't render the border blocks
+    // don't render border blocks
     if (static_blocks[i].x == 0 || static_blocks[i].x == num_blocks_w - 1 ||
       static_blocks[i].y == 0 || static_blocks[i].y == num_blocks_h - 1)
       continue;
 
-    SDL_Rect r = {
-      .x = static_blocks[i].x * block_w - vp.x,
-      .y = static_blocks[i].y * block_h - vp.y,
-      .w = block_w,
-      .h = block_h
-    };
-    if (SDL_RenderFillRect(renderer, &r) < 0)
-      error("drawing block");
+    render_sprite(renderer, sprites, 1,0, static_blocks[i].x,static_blocks[i].y);
   }
 
-  if (SDL_SetRenderDrawColor(renderer, 170, 230, 240, 255) < 0)
-    error("setting turret color");
   for (int i = 0; i < max_turrets; ++i) {
     if (turrets[i].flags & DELETED)
       continue;
 
-    SDL_Rect turret_rect = {
-      .x = turrets[i].x * block_w - vp.x,
-      .y = turrets[i].y * block_h - vp.y,
-      .w = block_w,
-      .h = block_h
-    };
-    if (SDL_RenderFillRect(renderer, &turret_rect) < 0)
-      error("filling rect");
+    if (turrets[i].flags & POWER)
+      render_sprite(renderer, sprites, 2,0, turrets[i].x,turrets[i].y);
+    else
+      render_sprite(renderer, sprites, 0,0, turrets[i].x,turrets[i].y);
   }
 
   if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255) < 0)
@@ -688,41 +613,17 @@ void render(SDL_Renderer* renderer, Entity blocks[], Entity static_blocks[], Ent
       .h = bullet_h
     };
     if (SDL_RenderFillRect(renderer, &bullet_rect) < 0)
-      error("filling rect");
+      error("filling bullet rect");
   }
-
-  if (SDL_SetRenderDrawColor(renderer, 140, 60, 140, 255) < 0)
-    error("setting player color");
-  SDL_Rect player_rect = {
-    .x = player.x * block_w - vp.x,
-    .y = player.y * block_h - vp.y,
-    .w = block_w,
-    .h = block_h
-  };
-  if (SDL_RenderFillRect(renderer, &player_rect) < 0)
-    error("filling rect");
 
   for (int i = 0; i < max_beasts; ++i) {
     if (beasts[i].flags & DELETED)
       continue;
 
-    if (beasts[i].flags & SUPER) {
-      if (SDL_SetRenderDrawColor(renderer, 225, 30, 30, 255) < 0)
-        error("setting super beast color");
-    }
-    else {
-      if (SDL_SetRenderDrawColor(renderer, 140, 60, 60, 255) < 0)
-        error("setting beast color");
-    }
-
-    SDL_Rect beast_rect = {
-      .x = beasts[i].x * block_w - vp.x,
-      .y = beasts[i].y * block_h - vp.y,
-      .w = block_w,
-      .h = block_h
-    };
-    if (SDL_RenderFillRect(renderer, &beast_rect) < 0)
-      error("filling beast rect");
+    if (beasts[i].flags & SUPER)
+      render_sprite(renderer, sprites, 2,1, beasts[i].x, beasts[i].y);
+    else
+      render_sprite(renderer, sprites, 0,1, beasts[i].x, beasts[i].y);
   }
 
   // header
@@ -884,7 +785,7 @@ void del_entity(Entity* ent, Entity* grid[]) {
   remove_from_grid(ent, grid);
 }
 
-void update_powered_walls(Entity* grid[], Entity static_blocks[], int max_static_blocks) {
+void update_powered_turrets(Entity* grid[], Entity static_blocks[]) {
   // clear POWER bit everywhere on the grid
   for (int i = 0; i < grid_len; ++i)
     if (grid[i] && grid[i]->flags & POWER)
@@ -911,6 +812,9 @@ void set_powered(Entity* grid[], int x, int y) {
   if (!ent || !(ent->flags & BLOCK) || ent->flags & POWER)
     return;
 
+  if (!(ent->flags & TURRET) && !(ent->flags & STATIC))
+    return;
+
   ent->flags |= POWER;
 
   set_powered(grid, x + 1, y);
@@ -919,41 +823,50 @@ void set_powered(Entity* grid[], int x, int y) {
   set_powered(grid, x, y - 1);
 }
 
-int get_move_pos(Entity* beast, Entity* player, Entity* grid[]) {
+int get_move_pos(Entity* beast, Entity turrets[], Entity* grid[]) {
+  Entity* turret = NULL;
+  double closest_dist = attack_dist;
+
+  for (int i = 0; i < max_turrets; ++i) {
+    if (turrets[i].flags & DELETED)
+      continue;
+
+    double dist = calc_dist(turrets[i].x, turrets[i].y, beast->x, beast->y);
+    if (dist < closest_dist) {
+      closest_dist = dist;
+      turret = &turrets[i];
+    }
+  }
+
+
   int x = beast->x;
   int y = beast->y;
 
   int dir_x = 0;
   int dir_y = 0;
-  if (player->x < x)
+  if (turret && turret->x < x)
     dir_x = -1;
-  else if (player->x > x)
+  else if (turret && turret->x > x)
     dir_x = 1;
 
-  if (player->y < y)
+  if (turret && turret->y < y)
     dir_y = -1;
-  else if (player->y > y)
+  else if (turret && turret->y > y)
     dir_y = 1;
 
   bool found_direction = true;
 
   // a quarter of the time we want them to move randomly
   // this keeps them from being too deterministic & from getting stuck
-  // behind walls, etc
-  bool move_randomly = rand() % 100 > 75;
+  // behind rocks, etc
+  bool move_randomly = !turret || rand() % 100 > 75;
 
-  // if the beast isn't within the attack distance, it should move randomly
-  double dist = calc_dist(player->x, player->y, beast->x, beast->y);
-  if (dist > attack_dist)
-    move_randomly = true;
-
-  // the beast will "get" the player on this move
-  if (abs(player->x - x) <= 1 && abs(player->y - y) <= 1) {
-    x = player->x;
-    y = player->y;
-  }
-  // try to move towards the player, if possible
-  else if (!move_randomly && dir_x && dir_y && !grid[to_pos(x + dir_x, y + dir_y)]) {
+  // the beast will "attack" the turret on this move; don't move away
+  if (turret && abs(turret->x - x) <= 1 && abs(turret->y - y) <= 1)
+    return to_pos(x, y);
+  
+  // try to move towards the fortress, if possible
+  if (!move_randomly && dir_x && dir_y && !grid[to_pos(x + dir_x, y + dir_y)]) {
     x += dir_x;
     y += dir_y;
   }
@@ -1114,6 +1027,13 @@ void render_img(SDL_Renderer* renderer, Image* img) {
 // centers the image horizontally in the viewport
 void center_img(Image* img, Viewport* viewport) {
   img->x = viewport->w / 2 - img->w / 2;
+}
+
+void render_sprite(SDL_Renderer* renderer, SDL_Texture* sprites, int src_x, int src_y, int dest_x, int dest_y) {
+  SDL_Rect src = {.x = src_x * block_w, .y = src_y * block_h, .w = block_w, .h = block_h};
+  SDL_Rect dest = {.x = dest_x * block_w - vp.x, .y = dest_y * block_h - vp.y, .w = block_w, .h = block_h};
+  if (SDL_RenderCopy(renderer, sprites, &src, &dest) < 0)
+    error("renderCopy");
 }
 
 bool is_mouseover(Image* img, int x, int y) {
