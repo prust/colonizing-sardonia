@@ -68,6 +68,7 @@ int to_pos(int x, int y);
 bool is_in_grid(int x, int y);
 
 // game-specific functions
+void play_level(SDL_Window* window, SDL_Renderer* renderer);
 bool is_next_to_wall(Entity* beast, Entity* grid[]);
 void beast_explode(Entity* beast, Entity* grid[]);
 Entity* closest_entity(int x, int y, Entity entities[], int num_entities);
@@ -157,11 +158,17 @@ int main(int num_args, char* args[]) {
   center_img(&hints_img, &vp);
 
   SDL_Event evt;
-  bool has_pressed = false;
-  while (!has_pressed) {
-    while (SDL_PollEvent(&evt))
-      if (evt.type == SDL_MOUSEBUTTONDOWN && is_mouseover(&start_game_img, evt.button.x, evt.button.y))
-        has_pressed = true;
+  bool exit_game = false;
+  while (!exit_game) {
+    while (SDL_PollEvent(&evt)) {
+      if (evt.type == SDL_KEYDOWN && evt.key.keysym.sym == SDLK_ESCAPE) {
+        exit_game = true;
+      }
+      else if (evt.type == SDL_MOUSEBUTTONDOWN && is_mouseover(&start_game_img, evt.button.x, evt.button.y)) {
+        SDL_SetCursor(arrow_cursor);
+        play_level(window, renderer);
+      }
+    }
 
     // set BG color
     if (SDL_SetRenderDrawColor(renderer, 44, 34, 30, 255) < 0)
@@ -187,8 +194,16 @@ int main(int num_args, char* args[]) {
     SDL_Delay(10);
   }
 
-  SDL_SetCursor(arrow_cursor);
+  if (SDL_SetWindowFullscreen(window, 0) < 0)
+    error("exiting fullscreen");
+  SDL_FreeCursor(arrow_cursor);
+  SDL_FreeCursor(hand_cursor);
+  SDL_DestroyWindow(window);
+  SDL_Quit();
+  return 0;
+}
 
+void play_level(SDL_Window* window, SDL_Renderer* renderer) {
   // load game
   grid_len = num_blocks_w * num_blocks_h;
   Entity* grid[grid_len];
@@ -687,14 +702,6 @@ int main(int num_args, char* args[]) {
     SDL_RenderPresent(renderer);
     SDL_Delay(10);
   }
-
-  if (SDL_SetWindowFullscreen(window, 0) < 0)
-    error("exiting fullscreen");
-  SDL_FreeCursor(arrow_cursor);
-  SDL_FreeCursor(hand_cursor);
-  SDL_DestroyWindow(window);
-  SDL_Quit();
-  return 0;
 }
 
 // Grid Functions
