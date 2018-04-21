@@ -19,13 +19,6 @@ typedef unsigned char byte;
 #define POWER 0x40
 #define SUPER 0x80
 
-int num_collected_blocks = 100;
-int block_ratio = 2; // you have to collect 2 rocks to build 1 wall
-int num_blocks_per_turret = 25; // collect 5 rocks to build 1 turret
-int num_block_per_refurb = 15; // discount if you "refurbish" an existing block to build a turret
-int attack_dist = 30; // how close a beast has to be before he moves towards you
-byte beast_health = 3;
-
 typedef struct {
   byte flags;
   byte health;
@@ -88,6 +81,17 @@ void center_img(Image* img, Viewport* viewport);
 bool is_mouseover(Image* img, int x, int y);
 void error(char* activity);
 
+// game globals
+Entity player = {.flags = PLAYER, .x = 1, .y = 1};
+Viewport vp = {};
+
+int num_collected_blocks;
+int block_ratio = 2; // you have to collect 2 rocks to build 1 wall
+int num_blocks_per_turret = 25; // collect 5 rocks to build 1 turret
+int num_block_per_refurb = 15; // discount if you "refurbish" an existing block to build a turret
+int attack_dist = 30; // how close a beast has to be before he moves towards you
+byte beast_health = 3;
+
 int block_w = 40;
 int block_h = 40;
 int bullet_w = 4;
@@ -96,28 +100,21 @@ double bullet_speed = 300.0; // in px/sec
 int block_density_pct = 20;
 int starting_distance = 15;
 
-Entity player = {.flags = PLAYER, .x = 1, .y = 1};
-
-Viewport vp = {
-  .x = 0,
-  .y = 0,
-  .w = 0,
-  .h = 0
-};
-
 int num_blocks_w = 40 * 3;
 int num_blocks_h = 30 * 3;
 int grid_len;
 
 unsigned int last_move_time = 0;
-int beast_speed = 500; // ms between moves
+int beast_move_interval = 500; // ms between beast moves
 unsigned int last_fire_time = 0;
 int turret_fire_interval = 2000; // ms between turret firing
 int mine_interval = 10000; // ms between mine generating metal
-const int num_beasts = 10;
+
+int max_beasts = 10;
 int max_turrets = 50;
 int max_bullets = 100;
 
+// top level (title screen)
 int main(int num_args, char* args[]) {
   srand(time(NULL));
   
@@ -196,14 +193,24 @@ int main(int num_args, char* args[]) {
 
   if (SDL_SetWindowFullscreen(window, 0) < 0)
     error("exiting fullscreen");
+  
   SDL_FreeCursor(arrow_cursor);
   SDL_FreeCursor(hand_cursor);
+
+  SDL_DestroyTexture(title_img.tex);
+  SDL_DestroyTexture(start_game_img.tex);
+  SDL_DestroyTexture(start_game_hover_img.tex);
+  SDL_DestroyTexture(hints_img.tex);
+  
   SDL_DestroyWindow(window);
   SDL_Quit();
   return 0;
 }
 
 void play_level(SDL_Window* window, SDL_Renderer* renderer) {
+  // reset global variables
+  num_collected_blocks = 100;
+
   // load game
   grid_len = num_blocks_w * num_blocks_h;
   Entity* grid[grid_len];
@@ -271,8 +278,8 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
     }
   }
 
-  Entity beasts[num_beasts];
-  for (int i = 0; i < num_beasts; ++i) {
+  Entity beasts[max_beasts];
+  for (int i = 0; i < max_beasts; ++i) {
     int pos;
     do {
       pos = find_avail_pos(grid);
@@ -565,7 +572,7 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
     if (SDL_RenderFillRect(renderer, &player_rect) < 0)
       error("filling rect");
 
-    for (int i = 0; i < num_beasts; ++i) {
+    for (int i = 0; i < max_beasts; ++i) {
       if (beasts[i].flags & DELETED)
         continue;
 
@@ -633,7 +640,7 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
     //     if (!(turret->flags & POWER))
     //       continue;
 
-    //     Entity* beast = closest_entity(turret->x, turret->y, beasts, num_beasts);
+    //     Entity* beast = closest_entity(turret->x, turret->y, beasts, max_beasts);
     //     if (beast) {
     //       double dist = calc_dist(beast->x, beast->y, turret->x, turret->y);
     //       // dividing by the distance gives us a normalized 1-unit vector
@@ -673,8 +680,8 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
     //   last_fire_time = curr_time;
     // }
 
-    if (curr_time - last_move_time >= beast_speed) {
-      for (int i = 0; i < num_beasts; ++i) {
+    if (curr_time - last_move_time >= beast_move_interval) {
+      for (int i = 0; i < max_beasts; ++i) {
         if (beasts[i].flags & DELETED)
           continue;
 
