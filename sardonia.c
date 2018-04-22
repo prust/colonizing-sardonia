@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <limits.h>
 
 #include "SDL.h"
 #include "SDL_image.h"
@@ -18,6 +19,8 @@ typedef unsigned char byte;
 #define TURRET 0x20
 #define POWER 0x40
 #define SUPER 0x80
+
+#define WATER 0x1
 
 typedef struct {
   byte flags;
@@ -50,7 +53,8 @@ typedef struct {
 } Image;
 
 // grid functions
-int find_avail_pos(Entity* grid[]);
+bool in_bounds(int x, int y);
+int find_avail_pos(Entity* grid[], byte grid_flags[]);
 void move(Entity* ent, Entity* grid[], int x, int y);
 void set_pos(Entity* ent, Entity* grid[], int pos);
 void set_xy(Entity* ent, Entity* grid[], int x, int y);
@@ -63,11 +67,15 @@ bool is_in_grid(int x, int y);
 // game-specific functions
 void play_level(SDL_Window* window, SDL_Renderer* renderer);
 void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity beasts[], Entity turrets[], Bullet bullets[]);
+void gen_water(byte grid_flags[], short top_left, short top_right, short bottom_left, short bottom_right, int x, int y, int w);
+void remove_sm_islands(byte grid_flags[]);
+void remove_sm_lakes(byte grid_flags[]);
 void on_mousemove(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power_stones[]);
 void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power_stones[]);
 void on_keydown(SDL_Event* evt, Entity* grid[], bool* is_gameover, bool* is_paused, SDL_Window* window);
+void on_scroll(SDL_Event* evt);
 void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Bullet bullets[]);
-void render(SDL_Renderer* renderer, SDL_Texture* sprites, Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]);
+void render(SDL_Renderer* renderer, SDL_Texture* sprites, byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]);
 
 bool is_next_to_wall(Entity* beast, Entity* grid[]);
 void beast_explode(Entity* beast, Entity* grid[]);
@@ -79,8 +87,8 @@ int get_move_pos(Entity* beast, Entity turrets[], Entity* grid[]);
 
 // generic functions
 void toggle_fullscreen(SDL_Window *win);
-bool in_bounds(int x, int y);
 double calc_dist(int x1, int y1, int x2, int y2);
+int clamp(int val, int min, int max);
 int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size);
 Image load_img(SDL_Renderer* renderer, char* path);
 void render_img(SDL_Renderer* renderer, Image* img);
@@ -104,10 +112,10 @@ int block_h = 40;
 int bullet_w = 4;
 int bullet_h = 4;
 double bullet_speed = 300.0; // in px/sec
-int block_density_pct = 20;
+int block_density_pct = 5;
 
-int num_blocks_w = 40 * 3;
-int num_blocks_h = 30 * 3;
+int num_blocks_w = 128; // 2^7
+int num_blocks_h = 128; // 2^7
 int grid_len;
 
 unsigned int last_move_time = 0;
@@ -131,7 +139,7 @@ int main(int num_args, char* args[]) {
     error("initializing SDL");
 
   SDL_Window* window;
-  window = SDL_CreateWindow("Beast", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, num_blocks_w * block_w, num_blocks_h * block_h, SDL_WINDOW_RESIZABLE);
+  window = SDL_CreateWindow("Future Fortress", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, num_blocks_w * block_w, num_blocks_h * block_h, SDL_WINDOW_RESIZABLE);
   if (!window)
     error("creating window");
   
@@ -287,11 +295,14 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
         case SDL_KEYDOWN:
           on_keydown(&evt, grid, &is_gameover, &is_paused, window);
           break;
+        case SDL_MOUSEWHEEL:
+          on_scroll(&evt);
+          break;
       }
     }
 
     update(dt, curr_time, grid, turrets, beasts, bullets);
-    render(renderer, sprites, blocks, power_stones, turrets, beasts, bullets);
+    render(renderer, sprites, grid_flags, blocks, power_stones, turrets, beasts, bullets);
 
     SDL_Delay(10);
   }
@@ -300,14 +311,19 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
 }
 
 void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity beasts[], Entity turrets[], Bullet bullets[]) {
+  // have to manually init b/c C doesn't allow initializing VLAs w/ {0}
   for (int i = 0; i < grid_len; ++i) {
     grid[i] = NULL;
     grid_flags[i] = 0;
   }
 
+  gen_water(grid_flags, 0, 0, 0, 0, 0,0, num_blocks_w);
+  remove_sm_islands(grid_flags);
+  remove_sm_lakes(grid_flags);
+
   // add power stones to the playing field
   for (int i = 0; i < max_power_stones; ++i) {
-    int pos = find_avail_pos(grid);
+    int pos = find_avail_pos(grid, grid_flags);
     power_stones[i].flags = (BLOCK | STONE);
     power_stones[i].x = to_x(pos);
     power_stones[i].y = to_y(pos);
@@ -316,7 +332,7 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stone
 
   for (int i = 0; i < max_blocks; ++i) {
     if (i < grid_len * block_density_pct / 100) {
-      int pos = find_avail_pos(grid);
+      int pos = find_avail_pos(grid, grid_flags);
       blocks[i].flags = BLOCK;
       blocks[i].x = to_x(pos);
       blocks[i].y = to_y(pos);
@@ -332,7 +348,7 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stone
     if (i == 0)
       beasts[i].flags |= SUPER;
 
-    int pos = find_avail_pos(grid);
+    int pos = find_avail_pos(grid, grid_flags);
     beasts[i].x = to_x(pos);
     beasts[i].y = to_y(pos);
     beasts[i].health = beast_health;
@@ -345,6 +361,76 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stone
 
   for (int i = 0; i < max_bullets; ++i)
     bullets[i].flags = DELETED;
+}
+
+void gen_water(byte grid_flags[], short top_left, short top_right, short bottom_left, short bottom_right, int x, int y, int w) {
+  short water_level = 0;
+  short avg = (top_left + top_right + bottom_left + bottom_right) / 4;
+  short deviation = rand() % USHRT_MAX - SHRT_MAX; // generate a random signed short
+  short center = clamp(avg + deviation, SHRT_MIN, SHRT_MAX);
+  
+  // for now, set center val to top center, bottom center, right center, left center
+  if (center < water_level) {
+    grid_flags[to_pos(x+w/2, y)] |= WATER; // top center
+    grid_flags[to_pos(x+w/2, y+w-1)] |= WATER; // bottom center
+    grid_flags[to_pos(x, y+w/2)] |= WATER; // left center
+    grid_flags[to_pos(x+w-1, y+w/2)] |= WATER; // right center
+  }
+  
+  // recurse to calc nested squares
+  if (w >= 2) {
+    w = w / 2;
+    gen_water(grid_flags, center, center, center, center, x,y, w);
+    gen_water(grid_flags, center, center, center, center, x+w,y, w);
+    gen_water(grid_flags, center, center, center, center, x,y+w, w);
+    gen_water(grid_flags, center, center, center, center, x+w,y+w, w);
+  }
+}
+
+void remove_sm_islands(byte grid_flags[]) {
+  for (int x = 0; x < num_blocks_w; ++x) {
+    for (int y = 0; y < num_blocks_h; ++y) {
+      if (grid_flags[to_pos(x, y)] & WATER)
+        continue;
+
+      bool has_adj_land = false;
+      if (x > 0 && !(grid_flags[to_pos(x - 1, y)] & WATER))
+        has_adj_land = true;
+      if (y > 0 && !(grid_flags[to_pos(x, y - 1)] & WATER))
+        has_adj_land = true;
+      if (x < (num_blocks_w - 1) && !(grid_flags[to_pos(x + 1, y)] & WATER))
+        has_adj_land = true;
+      if (y < (num_blocks_h - 1) && !(grid_flags[to_pos(x, y + 1)] & WATER))
+        has_adj_land = true;
+
+      // if it's a tiny 1-square island, flood it w/ water
+      if (!has_adj_land)
+        grid_flags[to_pos(x, y)] |= WATER;
+    }
+  }
+}
+
+void remove_sm_lakes(byte grid_flags[]) {
+  for (int x = 0; x < num_blocks_w; ++x) {
+    for (int y = 0; y < num_blocks_h; ++y) {
+      if (!(grid_flags[to_pos(x, y)] & WATER))
+        continue;
+
+      bool has_adj_water = false;
+      if (x > 0 && grid_flags[to_pos(x - 1, y)] & WATER)
+        has_adj_water = true;
+      if (y > 0 && grid_flags[to_pos(x, y - 1)] & WATER)
+        has_adj_water = true;
+      if (x < (num_blocks_w - 1) && grid_flags[to_pos(x + 1, y)] & WATER)
+        has_adj_water = true;
+      if (y < (num_blocks_h - 1) && grid_flags[to_pos(x, y + 1)] & WATER)
+        has_adj_water = true;
+
+      // if it's a tiny 1-square lake, remove the water
+      if (!has_adj_water)
+        grid_flags[to_pos(x, y)] &= ~(WATER);
+    }
+  }
 }
 
 // TODO: fix major DRY violation btwn mousemove & mousedown
@@ -413,6 +499,16 @@ void on_keydown(SDL_Event* evt, Entity* grid[], bool* is_gameover, bool* is_paus
       *is_paused = !*is_paused;
       break;
   }
+}
+
+void on_scroll(SDL_Event* evt) {
+  int dx = evt->wheel.x * 8;
+  int dy = evt->wheel.y * 8;
+  if (evt->wheel.direction == SDL_MOUSEWHEEL_FLIPPED)
+    dy = -dy;
+
+  vp.x = clamp(vp.x + dx, 0, num_blocks_w * block_w);
+  vp.y = clamp(vp.y + dy, 0, num_blocks_h * block_h);
 }
 
 void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
@@ -537,12 +633,28 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
   }
 }
 
-void render(SDL_Renderer* renderer, SDL_Texture* sprites, Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
+void render(SDL_Renderer* renderer, SDL_Texture* sprites, byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
   // set BG color
-  if (SDL_SetRenderDrawColor(renderer, 145, 103, 47, 255) < 0)
+  if (SDL_SetRenderDrawColor(renderer, 44, 34, 30, 255) < 0)
     error("setting bg color");
   if (SDL_RenderClear(renderer) < 0)
     error("clearing renderer");
+
+  if (SDL_SetRenderDrawColor(renderer, 145, 103, 47, 255) < 0)
+    error("setting land color");
+  for (int i = 0; i < grid_len; ++i) {
+    if (grid_flags[i] & WATER)
+      continue;
+
+    SDL_Rect land_rect = {
+      .x = to_x(i) * block_w - vp.x,
+      .y = to_y(i) * block_h - vp.y,
+      .w = block_w,
+      .h = block_h
+    };
+    if (SDL_RenderFillRect(renderer, &land_rect) < 0)
+      error("filling land rect");
+  }
 
   for (int i = 0; i < max_blocks; ++i) {
     if (blocks[i].flags & DELETED)
@@ -586,10 +698,14 @@ void render(SDL_Renderer* renderer, SDL_Texture* sprites, Entity blocks[], Entit
     if (beasts[i].flags & DELETED)
       continue;
 
+    int sprite_x_pos = 0;
+    int sprite_y_pos = 1;
     if (beasts[i].flags & SUPER)
-      render_sprite(renderer, sprites, 2,1, beasts[i].x, beasts[i].y);
-    else
-      render_sprite(renderer, sprites, 0,1, beasts[i].x, beasts[i].y);
+      sprite_x_pos = 2;
+    if (grid_flags[to_pos(beasts[i].x, beasts[i].y)] & WATER)
+      sprite_y_pos += 1;
+
+    render_sprite(renderer, sprites, sprite_x_pos,sprite_y_pos, beasts[i].x, beasts[i].y);
   }
 
   // header
@@ -628,7 +744,7 @@ bool in_bounds(int x, int y) {
     y >= 0 && y < num_blocks_h;
 }
 
-int find_avail_pos(Entity* grid[]) {
+int find_avail_pos(Entity* grid[], byte grid_flags[]) {
   int x;
   int y;
   int pos;
@@ -636,7 +752,7 @@ int find_avail_pos(Entity* grid[]) {
     x = rand() % num_blocks_w;
     y = rand() % num_blocks_h;
     pos = to_pos(x, y);
-  } while (grid[pos]);
+  } while (grid[pos] || grid_flags[pos] & WATER);
   return pos;
 }
 
@@ -827,30 +943,30 @@ int get_move_pos(Entity* beast, Entity turrets[], Entity* grid[]) {
     return to_pos(x, y);
   
   // try to move towards the fortress, if possible
-  if (!move_randomly && dir_x && dir_y && !grid[to_pos(x + dir_x, y + dir_y)]) {
+  if (!move_randomly && dir_x && dir_y && in_bounds(x + dir_x, y + dir_y) && !grid[to_pos(x + dir_x, y + dir_y)]) {
     x += dir_x;
     y += dir_y;
   }
-  else if (!move_randomly && dir_x && !grid[to_pos(x + dir_x, y)]) {
+  else if (!move_randomly && dir_x && in_bounds(x + dir_x, y) && !grid[to_pos(x + dir_x, y)]) {
     x += dir_x;
   }
-  else if (!move_randomly && dir_y && !grid[to_pos(x, y + dir_y)]) {
+  else if (!move_randomly && dir_y && in_bounds(x, y + dir_y) && !grid[to_pos(x, y + dir_y)]) {
     y += dir_y;
   }
   // if there's no delta in one dimension, try +/- 1
-  else if (!move_randomly && !dir_x && !grid[to_pos(x + 1, y + dir_y)]) {
+  else if (!move_randomly && !dir_x && in_bounds(x + 1, y + dir_y) && !grid[to_pos(x + 1, y + dir_y)]) {
     x += 1;
     y += dir_y;
   }
-  else if (!move_randomly && !dir_x && !grid[to_pos(x - 1, y + dir_y)]) {
+  else if (!move_randomly && !dir_x && in_bounds(x - 1, y + dir_y) && !grid[to_pos(x - 1, y + dir_y)]) {
     x -= 1;
     y += dir_y;
   }
-  else if (!move_randomly && !dir_y && !grid[to_pos(x + dir_x, y + 1)]) {
+  else if (!move_randomly && !dir_y && in_bounds(x + dir_x, y + 1) && !grid[to_pos(x + dir_x, y + 1)]) {
     x += dir_x;
     y += 1;
   }
-  else if (!move_randomly && !dir_y && !grid[to_pos(x + dir_x, y - 1)]) {
+  else if (!move_randomly && !dir_y && in_bounds(x + dir_x, y - 1) && !grid[to_pos(x + dir_x, y - 1)]) {
     x += dir_x;
     y -= 1;
   }
@@ -863,7 +979,7 @@ int get_move_pos(Entity* beast, Entity turrets[], Entity* grid[]) {
           if (!mv_x && !mv_y)
             continue; // 0,0 isn't a real move
 
-          if (!grid[to_pos(x + mv_x, y + mv_y)]) {
+          if (in_bounds(x + mv_x, y + mv_y) && !grid[to_pos(x + mv_x, y + mv_y)]) {
             found_direction = true;
             break;
           }
@@ -908,13 +1024,13 @@ int get_move_pos(Entity* beast, Entity turrets[], Entity* grid[]) {
           mv_x = 1;
           mv_y = 1;
         }
-      } while (grid[to_pos(x + mv_x, y + mv_y)]);
+      } while (in_bounds(x + mv_x, y + mv_y) && grid[to_pos(x + mv_x, y + mv_y)]);
       x += mv_x;
       y += mv_y;
     }
   }
 
-  if (!found_direction)
+  if (!found_direction || !in_bounds(x, y))
     return -1;
   else
     return to_pos(x, y);
@@ -936,6 +1052,15 @@ void toggle_fullscreen(SDL_Window *win) {
 
 double calc_dist(int x1, int y1, int x2, int y2) {
   return sqrt(pow(x1 - x2, 2) + pow(y1 - y2, 2));
+}
+
+int clamp(int val, int min, int max) {
+  if (val < min)
+    return min;
+  else if (val > max)
+    return max;
+  else
+    return val;
 }
 
 int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size) {
