@@ -14,11 +14,11 @@ typedef unsigned char byte;
 #define DELETED 0x1
 #define BLOCK 0x2
 #define BEAST 0x4
-#define PLAYER 0x8
-#define STONE 0x10
-#define TURRET 0x20
+#define PLAYER 0x8 // unused?
+#define STONE 0x10 // unused?
+#define TURRET 0x20 // unused?
 #define POWER 0x40
-#define SUPER 0x80
+#define SUPER 0x80 // can just be POWER
 
 #define WATER 0x1
 
@@ -768,17 +768,22 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, byt
     error("setting filled coin bar color");
 
   double coin_bar_len = 0;
-  if (num_collected_blocks <= 50)
+  if (num_collected_blocks <= 40)
     coin_bar_len = num_collected_blocks * 5;
-  else if (num_collected_blocks <= 100)
-    coin_bar_len = 50.0 * 5.0 + (num_collected_blocks - 50.0) * 2.5;
-  else if (num_collected_blocks <= 150)
-    coin_bar_len = 50.0 * 5.0 + 100.0 * 2.5 + (num_collected_blocks - 100.0) * 1.25;
+  else if (num_collected_blocks <= 80)
+    coin_bar_len = 40.0 * 5.0 + (num_collected_blocks - 40.0) * 2.5;
+  else if (num_collected_blocks <= 120)
+    coin_bar_len = 40.0 * (5.0 + 2.5) + (num_collected_blocks - 80.0) * 1.25;
+  else if (num_collected_blocks <= 160)
+    coin_bar_len = 40.0 * (5.0 + 2.5 + 1.25) + (num_collected_blocks - 120.0) * 0.625;
   else if (num_collected_blocks <= 200)
-    coin_bar_len = 50.0 * 5.0 + 100.0 * 2.5 + 150.0 * 1.25 + (num_collected_blocks - 150.0) * 0.625;
+    coin_bar_len = 40.0 * (5.0 + 2.5 + 1.25 + 0.625) + (num_collected_blocks - 160.0) * 0.3125;
+  else if (num_collected_blocks <= 240)
+    coin_bar_len = 40.0 * (5.0 + 2.5 + 1.25 + 0.625 + 0.3125) + (num_collected_blocks - 200.0) * 0.15625;
+  else if (num_collected_blocks <= 280)
+    coin_bar_len = 40.0 * (5.0 + 2.5 + 1.25 + 0.625 + 0.3125 + 0.15625) + (num_collected_blocks - 240.0) * 0.078125;
   else
-    coin_bar_len = 50.0 * 5.0 + 100.0 * 2.5 + 150 * 0.625;
-  // TODO: fill this out more & make it programmatic
+    coin_bar_len = 40.0 * (5.0 + 2.5 + 1.25 + 0.625 + 0.3125 + 0.15625 + 0.078125);
 
   SDL_Rect coin_bar_rect = {
     .x = control_x + 10,
