@@ -81,6 +81,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
 void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]);
 
 bool is_next_to_wall(Entity* beast, Entity* grid[]);
+bool is_adj(Entity* grid[], byte grid_flags[], int x, int y);
 bool is_adj_horiz(Entity* grid[], byte grid_flags[], int x, int y);
 bool is_adj_vert(Entity* grid[], byte grid_flags[], int x, int y);
 void beast_explode(Entity* beast, Entity* grid[]);
@@ -121,7 +122,7 @@ int block_h = 40;
 int bullet_w = 4;
 int bullet_h = 4;
 double bullet_speed = 300.0; // in px/sec
-int block_density_pct = 2;
+int block_density_pct = 4;
 
 int num_blocks_w = 128; // 2^7
 int num_blocks_h = 128; // 2^7
@@ -134,7 +135,7 @@ int turret_fire_interval = 2000; // ms between turret firing
 int mine_interval = 10000; // ms between mine generating metal
 
 int max_beasts = 100;
-int max_turrets = 50;
+int max_turrets = 500;
 int max_bullets = 100;
 int max_blocks;
 int max_power_stones = 10;
@@ -505,6 +506,18 @@ void place_entity(int x, int y, Entity* grid[], byte grid_flags[], Entity turret
     return;
 
   if (selected_btn == &fortress_btn) {
+
+    // if there's nothing adjacent, disallow if there are existing fortress
+    if (!is_adj(grid, grid_flags, x, y)) {
+      bool are_fortresses = false;
+      for (int i = 0; i < max_turrets; ++i)
+        if (!(turrets[i].flags & DELETED))
+          are_fortresses = true;
+
+      if (are_fortresses)
+        return;
+    }
+
     for (int i = 0; i < max_turrets; ++i) {
       if (turrets[i].flags & DELETED) {
         if (is_refurb)
@@ -520,8 +533,11 @@ void place_entity(int x, int y, Entity* grid[], byte grid_flags[], Entity turret
     // TODO: alert the player if max_turrets has been reached
   }
   else {
+    // abort if there's already a road here or if there's nothing adjacent
     if (grid_flags[pos] & ROAD)
-      return; // there's already a road here
+      return;
+    if (!is_adj(grid, grid_flags, x, y))
+      return;
 
     num_collected_blocks -= num_required_blocks;
     grid_flags[pos] |= ROAD; // set road bit
@@ -999,6 +1015,10 @@ bool is_next_to_wall(Entity* beast, Entity* grid[]) {
     }
   }
   return false;
+}
+
+bool is_adj(Entity* grid[], byte grid_flags[], int x, int y) {
+  return is_adj_horiz(grid, grid_flags, x, y) || is_adj_vert(grid, grid_flags, x, y);
 }
 
 bool is_adj_horiz(Entity* grid[], byte grid_flags[], int x, int y) {
