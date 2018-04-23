@@ -15,14 +15,14 @@ typedef unsigned char byte;
 #define DELETED 0x1
 #define BLOCK 0x2
 #define BEAST 0x4
-#define ROAD 0x8
+#define NEST 0x8
 #define STONE 0x10 // power stone
 #define TURRET 0x20
 #define POWER 0x40 // power turret
-#define NEST 0x80
 
 // grid flags
 #define WATER 0x1
+#define ROAD 0x2 // roads & bridges
 
 typedef struct {
   byte flags;
@@ -72,12 +72,13 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stone
 void gen_water(byte grid_flags[], short top_left, short top_right, short bottom_left, short bottom_right, int x, int y, int w);
 void remove_sm_islands(byte grid_flags[]);
 void remove_sm_lakes(byte grid_flags[]);
-void on_mousemove(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power_stones[]);
-void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power_stones[]);
+void on_mousemove(SDL_Event* evt, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]);
+void on_mousedown(SDL_Event* evt, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]);
+void place_entity(int x, int y, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]);
 void on_keydown(SDL_Event* evt, Entity* grid[], bool* is_gameover, bool* is_paused, SDL_Window* window);
 void on_scroll(SDL_Event* evt);
 void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Bullet bullets[]);
-void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]);
+void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]);
 
 bool is_next_to_wall(Entity* beast, Entity* grid[]);
 void beast_explode(Entity* beast, Entity* grid[]);
@@ -130,7 +131,7 @@ unsigned int last_fire_time = 0;
 int turret_fire_interval = 2000; // ms between turret firing
 int mine_interval = 10000; // ms between mine generating metal
 
-int max_beasts = 10;
+int max_beasts = 100;
 int max_turrets = 50;
 int max_bullets = 100;
 int max_blocks;
@@ -302,10 +303,10 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
             SDL_GetWindowSize(window, &vp.w, &vp.h);
           break;
         case SDL_MOUSEMOTION:
-          on_mousemove(&evt, grid, turrets, power_stones);
+          on_mousemove(&evt, grid, grid_flags, turrets, power_stones);
           break;
         case SDL_MOUSEBUTTONDOWN:
-          on_mousedown(&evt, grid, turrets, power_stones);
+          on_mousedown(&evt, grid, grid_flags, turrets, power_stones);
           break;
         case SDL_KEYDOWN:
           on_keydown(&evt, grid, &is_gameover, &is_paused, window);
@@ -317,7 +318,7 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
     }
 
     update(dt, curr_time, grid, turrets, beasts, bullets);
-    render(renderer, &ui_bar_img, sprites, grid_flags, blocks, power_stones, turrets, beasts, bullets);
+    render(renderer, &ui_bar_img, sprites, grid, grid_flags, blocks, power_stones, turrets, beasts, bullets);
 
     SDL_Delay(10);
   }
@@ -370,10 +371,9 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stone
     grid[pos] = &beasts[i];
   }
 
-  // precreate all turrets "blocks" as deleted
+  // precreate all turrets/bullets as deleted
   for (int i = 0; i < max_turrets; ++i)
     turrets[i].flags = BLOCK | TURRET | DELETED;
-
   for (int i = 0; i < max_bullets; ++i)
     bullets[i].flags = DELETED;
 }
@@ -448,36 +448,14 @@ void remove_sm_lakes(byte grid_flags[]) {
   }
 }
 
-// TODO: fix major DRY violation btwn mousemove & mousedown
-void on_mousemove(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power_stones[]) {
+void on_mousemove(SDL_Event* evt, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]) {
   if (!(evt->motion.state & SDL_BUTTON_LMASK))
     return;
 
-  int x = (evt->button.x + vp.x) / block_w;
-  int y = (evt->button.y + vp.y) / block_h;
-  int pos = to_pos(x, y);
-
-  bool is_refurb = grid[pos] && grid[pos]->flags == BLOCK;
-  int num_required_blocks = is_refurb ? num_blocks_per_refurb : num_blocks_per_turret;
-  if ((grid[pos] && !is_refurb) || num_collected_blocks < num_required_blocks)
-    return;
-
-  for (int i = 0; i < max_turrets; ++i) {
-    if (turrets[i].flags & DELETED) {
-      if (is_refurb)
-        del_entity(grid[pos], grid);
-
-      num_collected_blocks -= num_required_blocks;
-      turrets[i].flags &= (~DELETED); // clear deleted bit
-      set_xy(&turrets[i], grid, x, y);
-      update_powered_turrets(grid, power_stones);
-      break;
-    }
-  }
-  // TODO: determine if max_turrets has been reached & alert the player
+  place_entity(evt->button.x, evt->button.y, grid, grid_flags, turrets, power_stones);
 }
 
-void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power_stones[]) {
+void on_mousedown(SDL_Event* evt, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]) {
   // check for button-clicks
   if (contains(&road_btn, evt->button.x, evt->button.y)) {
     selected_btn = &road_btn;
@@ -492,29 +470,60 @@ void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power
     return;
   }
 
-  // try to place a fortress
-  int x = (evt->button.x + vp.x) / block_w;
-  int y = (evt->button.y + vp.y) / block_h;
+  place_entity(evt->button.x, evt->button.y, grid, grid_flags, turrets, power_stones);
+}
+
+void place_entity(int x, int y, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]) {
+  // try to place a road/fortress/bridge
+  x = (x + vp.x) / block_w;
+  y = (y + vp.y) / block_h;
   int pos = to_pos(x, y);
 
-  bool is_refurb = grid[pos] && grid[pos]->flags == BLOCK;
-  int num_required_blocks = is_refurb ? num_blocks_per_refurb : num_blocks_per_turret;
+  bool is_refurb = false;
+  int num_required_blocks;
+  if (selected_btn == &road_btn) {
+    num_required_blocks = num_blocks_per_road;
+    if (grid_flags[pos] & WATER)
+      return; // can't build a road on water
+  }
+  else if (selected_btn == &fortress_btn) {
+    is_refurb = grid[pos] && grid[pos]->flags == BLOCK;
+    num_required_blocks = is_refurb ? num_blocks_per_refurb : num_blocks_per_turret;
+  }
+  else if (selected_btn == &bridge_btn) {
+    num_required_blocks = num_blocks_per_bridge;
+    if (!(grid_flags[pos] & WATER))
+      return; // can't build bridge on land
+  }
+  else {
+    error("selected button is not road/fortress/bridge");
+  }
+
   if ((grid[pos] && !is_refurb) || num_collected_blocks < num_required_blocks)
     return;
 
-  for (int i = 0; i < max_turrets; ++i) {
-    if (turrets[i].flags & DELETED) {
-      if (is_refurb)
-        del_entity(grid[pos], grid);
-      
-      num_collected_blocks -= num_required_blocks;
-      turrets[i].flags &= (~DELETED); // clear deleted bit
-      set_xy(&turrets[i], grid, x, y);
-      update_powered_turrets(grid, power_stones);
-      break;
+  if (selected_btn == &fortress_btn) {
+    for (int i = 0; i < max_turrets; ++i) {
+      if (turrets[i].flags & DELETED) {
+        if (is_refurb)
+          del_entity(grid[pos], grid);
+        
+        num_collected_blocks -= num_required_blocks;
+        turrets[i].flags &= (~DELETED); // clear deleted bit
+        set_xy(&turrets[i], grid, x, y);
+        update_powered_turrets(grid, power_stones);
+        break;
+      }
     }
+    // TODO: alert the player if max_turrets has been reached
   }
-  // TODO: determine if max_turrets has been reached & alert the player?
+  else {
+    if (grid_flags[pos] & ROAD)
+      return; // there's already a road here
+
+    num_collected_blocks -= num_required_blocks;
+    grid_flags[pos] |= ROAD; // set road bit
+  }
 }
 
 void on_keydown(SDL_Event* evt, Entity* grid[], bool* is_gameover, bool* is_paused, SDL_Window* window) {
@@ -663,7 +672,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
   }
 }
 
-void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
+void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
   // set BG color
   if (SDL_SetRenderDrawColor(renderer, 44, 34, 30, 255) < 0)
     error("setting bg color");
@@ -759,6 +768,48 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, byt
       error("filling bullet rect");
   }
 
+  // draw roads
+  for (int i = 0; i < grid_len; ++i) {
+    if (grid_flags[i] & ROAD && !(grid_flags[i] & WATER)) {
+      int x = to_x(i);
+      int y = to_y(i);
+
+      bool is_anything_above_below = false;
+
+      // if there's anything above or below, draw vert road
+      if (y > 0) {
+        int above_pos = to_pos(x, y - 1);
+        if (grid_flags[above_pos] & ROAD || (grid[above_pos] && grid[above_pos]->flags & TURRET))
+          is_anything_above_below = true;
+      }
+      if (y < num_blocks_h - 1) {
+        int below_pos = to_pos(x, y + 1);
+        if (grid_flags[below_pos] & ROAD || (grid[below_pos] && grid[below_pos]->flags & TURRET))
+          is_anything_above_below = true;
+      }
+
+      if (is_anything_above_below)
+        render_sprite(renderer, sprites, 3,1, x, y);
+
+      // if there's anything to the left or right, draw horiz road
+      bool is_anything_left_right = false;
+      if (x > 0) {
+        int left_pos = to_pos(x - 1, y);
+        if (grid_flags[left_pos] & ROAD || (grid[left_pos] && grid[left_pos]->flags & TURRET))
+          is_anything_left_right = true;
+      }
+      if (x < num_blocks_w - 1) {
+        int right_pos = to_pos(x + 1, y);
+        if (grid_flags[right_pos] & ROAD || (grid[right_pos] && grid[right_pos]->flags & TURRET))
+          is_anything_left_right = true;
+      }
+
+      if (!is_anything_above_below || is_anything_left_right)
+        render_sprite(renderer, sprites, 3,2, x, y);    
+    }
+  }
+
+  // draw beasts & super-beasts
   for (int i = 0; i < max_beasts; ++i) {
     if (beasts[i].flags & DELETED)
       continue;
@@ -772,6 +823,11 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, byt
 
     render_sprite(renderer, sprites, sprite_x_pos,sprite_y_pos, beasts[i].x, beasts[i].y);
   }
+
+  // draw bridges
+  for (int i = 0; i < grid_len; ++i)
+    if (grid_flags[i] & ROAD && grid_flags[i] & WATER)
+      render_sprite(renderer, sprites, 1,2, to_x(i), to_y(i));
 
   // header
   int text_px_size = 2;
