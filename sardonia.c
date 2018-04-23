@@ -96,6 +96,7 @@ void center_img(Image* img, Viewport* viewport);
 void render_sprite(SDL_Renderer* renderer, SDL_Texture* sprites, int src_x, int src_y, int dest_x, int dest_y);
 void render_corner(SDL_Renderer* renderer, SDL_Texture* sprites, int src_x, int src_y, int dest_x, int dest_y);
 bool is_mouseover(Image* img, int x, int y);
+bool contains(SDL_Rect* r, int x, int y);
 void error(char* activity);
 
 // game globals
@@ -133,6 +134,14 @@ int max_bullets = 100;
 int max_blocks;
 int max_power_stones = 10;
 
+SDL_Rect road_btn = {.x = 0, .y = 5, .w = 50, .h = 50};
+SDL_Rect fortress_btn = {.x = 0, .y = 5, .w = 50, .h = 50};
+SDL_Rect bridge_btn = {.x = 0, .y = 5, .w = 50, .h = 50};
+SDL_Rect* selected_btn = &fortress_btn;
+SDL_Rect* hover_btn = NULL;
+SDL_Cursor* arrow_cursor = NULL;
+SDL_Cursor* hand_cursor = NULL;
+
 // top level (title screen)
 int main(int num_args, char* args[]) {
   srand(time(NULL));
@@ -156,8 +165,8 @@ int main(int num_args, char* args[]) {
   if (SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) < 0)
     error("setting blend mode");
 
-  SDL_Cursor* arrow_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
-  SDL_Cursor* hand_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
+  arrow_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
+  hand_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
 
   Image title_img = load_img(renderer, "images/title.png");
   title_img.y = 50;
@@ -467,6 +476,21 @@ void on_mousemove(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power
 }
 
 void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power_stones[]) {
+  // check for button-clicks
+  if (contains(&road_btn, evt->button.x, evt->button.y)) {
+    selected_btn = &road_btn;
+    return;
+  }
+  else if (contains(&fortress_btn, evt->button.x, evt->button.y)) {
+    selected_btn = &fortress_btn;
+    return;
+  }
+  else if (contains(&bridge_btn, evt->button.x, evt->button.y)) {
+    selected_btn = &bridge_btn;
+    return;
+  }
+
+  // try to place a fortress
   int x = (evt->button.x + vp.x) / block_w;
   int y = (evt->button.y + vp.y) / block_h;
   int pos = to_pos(x, y);
@@ -762,6 +786,48 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, byt
 
   int control_x = vp.w/2 - ui_bar_img->w/2;
   ui_bar_img->x = control_x;
+  road_btn.x = control_x + 5;
+  fortress_btn.x = control_x + 98;
+  bridge_btn.x = control_x + 184;
+
+  int mouse_x, mouse_y;
+  SDL_GetMouseState(&mouse_x, &mouse_y);
+  
+  if (contains(&road_btn, mouse_x, mouse_y))
+    hover_btn = &road_btn;
+  else if (contains(&fortress_btn, mouse_x, mouse_y))
+    hover_btn = &fortress_btn;
+  else if (contains(&bridge_btn, mouse_x, mouse_y))
+    hover_btn = &bridge_btn;
+  else
+    hover_btn = NULL;
+
+  if (hover_btn) {
+    SDL_SetCursor(hand_cursor);
+    if (SDL_SetRenderDrawColor(renderer, 44, 34, 30, 100) < 0)
+      error("setting hover btn bg color");
+    if (SDL_RenderFillRect(renderer, hover_btn) < 0)
+      error("filling hover_btn rect");
+  }
+  else {
+    SDL_SetCursor(arrow_cursor);
+  }
+
+  if (SDL_SetRenderDrawColor(renderer, 44, 34, 30, 255) < 0)
+    error("setting selected btn bg color");
+
+  if (SDL_RenderFillRect(renderer, selected_btn) < 0)
+    error("filling selected_btn rect");
+
+  if (SDL_SetRenderDrawColor(renderer, 227, 167, 11, 255) < 0)
+    error("setting selected btn highlight");
+
+  SDL_Rect selected_btn_highlight = {
+    .x = selected_btn->x, .y = selected_btn->y, .w = selected_btn->w, .h = 3
+  };
+  if (SDL_RenderFillRect(renderer, &selected_btn_highlight) < 0)
+    error("filling selected btn highlight");
+
   render_img(renderer, ui_bar_img);
 
   if (SDL_SetRenderDrawColor(renderer, 59, 59, 59, 255) < 0)
@@ -797,23 +863,17 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, byt
   if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170) < 0)
     error("setting disabled overlay color");
 
-  if (num_collected_blocks < num_blocks_per_road) {
-    SDL_Rect disabled_overlay = {.x = control_x + 5, .y = 5, .w = 50, .h = 50};
-    if (SDL_RenderFillRect(renderer, &disabled_overlay) < 0)
+  if (num_collected_blocks < num_blocks_per_road)
+    if (SDL_RenderFillRect(renderer, &road_btn) < 0)
       error("filling disabled overlay");
-  }
 
-  if (num_collected_blocks < num_blocks_per_turret) {
-    SDL_Rect disabled_overlay = {.x = control_x + 98, .y = 5, .w = 50, .h = 50};
-    if (SDL_RenderFillRect(renderer, &disabled_overlay) < 0)
+  if (num_collected_blocks < num_blocks_per_turret)
+    if (SDL_RenderFillRect(renderer, &fortress_btn) < 0)
       error("filling disabled overlay");
-  }
 
-  if (num_collected_blocks < num_blocks_per_bridge) {
-    SDL_Rect disabled_overlay = {.x = control_x + 184, .y = 5, .w = 50, .h = 50};
-    if (SDL_RenderFillRect(renderer, &disabled_overlay) < 0)
+  if (num_collected_blocks < num_blocks_per_bridge)
+    if (SDL_RenderFillRect(renderer, &bridge_btn) < 0)
       error("filling disabled overlay");
-  }
 
   SDL_RenderPresent(renderer);
 }
@@ -1211,9 +1271,16 @@ void render_corner(SDL_Renderer* renderer, SDL_Texture* sprites, int src_x, int 
     error("renderCopy");
 }
 
+// TODO: consolidate w/ below contains()
 bool is_mouseover(Image* img, int x, int y) {
   return x >= img->x && x <= (img->x + img->w) &&
     y >= img->y && y <= (img->y + img->h);
+}
+
+// TODO: consolidate w/ above is_mouseover()
+bool contains(SDL_Rect* r, int x, int y) {
+  return x >= r->x && x <= (r->x + r->w) &&
+    y >= r->y && y <= (r->y + r->h);
 }
 
 void error(char* activity) {
