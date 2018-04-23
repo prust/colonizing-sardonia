@@ -75,7 +75,7 @@ void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power
 void on_keydown(SDL_Event* evt, Entity* grid[], bool* is_gameover, bool* is_paused, SDL_Window* window);
 void on_scroll(SDL_Event* evt);
 void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Bullet bullets[]);
-void render(SDL_Renderer* renderer, SDL_Texture* sprites, byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]);
+void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]);
 
 bool is_next_to_wall(Entity* beast, Entity* grid[]);
 void beast_explode(Entity* beast, Entity* grid[]);
@@ -103,8 +103,10 @@ Viewport vp = {};
 
 int num_collected_blocks;
 int block_ratio = 2; // you have to collect 2 rocks to build 1 wall
+int num_blocks_per_road = 3;
 int num_blocks_per_turret = 25; // collect 5 rocks to build 1 turret
-int num_block_per_refurb = 15; // discount if you "refurbish" an existing block to build a turret
+int num_blocks_per_refurb = 15; // discount if you "refurbish" an existing block to build a turret
+int num_blocks_per_bridge = 50;
 int attack_dist = 30; // how close a beast has to be before he moves towards you
 byte beast_health = 3;
 
@@ -243,6 +245,7 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
 
   load(grid, grid_flags, blocks, power_stones, beasts, turrets, bullets);
 
+  Image ui_bar_img = load_img(renderer, "images/ui-bar.png");
   SDL_Texture* sprites = IMG_LoadTexture(renderer, "images/spritesheet.png");
 
   // game loop (incl. events, update & draw)
@@ -303,7 +306,7 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
     }
 
     update(dt, curr_time, grid, turrets, beasts, bullets);
-    render(renderer, sprites, grid_flags, blocks, power_stones, turrets, beasts, bullets);
+    render(renderer, &ui_bar_img, sprites, grid_flags, blocks, power_stones, turrets, beasts, bullets);
 
     SDL_Delay(10);
   }
@@ -444,7 +447,7 @@ void on_mousemove(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power
   int pos = to_pos(x, y);
 
   bool is_refurb = grid[pos] && grid[pos]->flags == BLOCK;
-  int num_required_blocks = is_refurb ? num_block_per_refurb : num_blocks_per_turret;
+  int num_required_blocks = is_refurb ? num_blocks_per_refurb : num_blocks_per_turret;
   if ((grid[pos] && !is_refurb) || num_collected_blocks < num_required_blocks)
     return;
 
@@ -469,7 +472,7 @@ void on_mousedown(SDL_Event* evt, Entity* grid[], Entity turrets[], Entity power
   int pos = to_pos(x, y);
 
   bool is_refurb = grid[pos] && grid[pos]->flags == BLOCK;
-  int num_required_blocks = is_refurb ? num_block_per_refurb : num_blocks_per_turret;
+  int num_required_blocks = is_refurb ? num_blocks_per_refurb : num_blocks_per_turret;
   if ((grid[pos] && !is_refurb) || num_collected_blocks < num_required_blocks)
     return;
 
@@ -634,7 +637,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
   }
 }
 
-void render(SDL_Renderer* renderer, SDL_Texture* sprites, byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
+void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
   // set BG color
   if (SDL_SetRenderDrawColor(renderer, 44, 34, 30, 255) < 0)
     error("setting bg color");
@@ -746,28 +749,53 @@ void render(SDL_Renderer* renderer, SDL_Texture* sprites, byte grid_flags[], Ent
 
   // header
   int text_px_size = 2;
-  if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255) < 0)
+  if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255) < 0)
     error("setting header color");
   SDL_Rect header_rect = {
     .x = 0,
     .y = 0,
     .w = vp.w,
-    .h = text_px_size * 8 + 4
+    .h = 75
   };
   if (SDL_RenderFillRect(renderer, &header_rect) < 0)
     error("filling header rect");
 
-  if (SDL_SetRenderDrawColor(renderer, 140, 60, 60, 255) < 0)
-    error("setting header text color");
+  int control_x = vp.w/2 - ui_bar_img->w/2;
+  ui_bar_img->x = control_x;
+  render_img(renderer, ui_bar_img);
 
-  int num_mines = 0;
-  for (int i = 0; i < max_turrets; ++i)
-    if (!(turrets[i].flags & DELETED))
-      num_mines++;
+  if (SDL_SetRenderDrawColor(renderer, 59, 59, 59, 255) < 0)
+    error("setting filled coin bar color");
 
-  char resource_str[24];
-  snprintf(resource_str, sizeof(resource_str), "Mines: %d, Metal: %d", num_mines, num_collected_blocks);
-  render_text(renderer, resource_str, 2, 2, text_px_size);
+  SDL_Rect coin_bar_rect = {
+    .x = control_x + 10,
+    .y = 60,
+    .w = num_collected_blocks * 5,
+    .h = 5
+  };
+  if (SDL_RenderFillRect(renderer, &coin_bar_rect) < 0)
+    error("filling header rect");
+
+  if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170) < 0)
+    error("setting disabled overlay color");
+
+  if (num_collected_blocks < num_blocks_per_road) {
+    SDL_Rect disabled_overlay = {.x = control_x + 5, .y = 5, .w = 50, .h = 50};
+    if (SDL_RenderFillRect(renderer, &disabled_overlay) < 0)
+      error("filling disabled overlay");
+  }
+
+  if (num_collected_blocks < num_blocks_per_turret) {
+    SDL_Rect disabled_overlay = {.x = control_x + 98, .y = 5, .w = 50, .h = 50};
+    if (SDL_RenderFillRect(renderer, &disabled_overlay) < 0)
+      error("filling disabled overlay");
+  }
+
+  if (num_collected_blocks < num_blocks_per_bridge) {
+    SDL_Rect disabled_overlay = {.x = control_x + 184, .y = 5, .w = 50, .h = 50};
+    if (SDL_RenderFillRect(renderer, &disabled_overlay) < 0)
+      error("filling disabled overlay");
+  }
 
   SDL_RenderPresent(renderer);
 }
