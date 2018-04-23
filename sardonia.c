@@ -81,6 +81,8 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
 void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]);
 
 bool is_next_to_wall(Entity* beast, Entity* grid[]);
+bool is_adj_horiz(Entity* grid[], byte grid_flags[], int x, int y);
+bool is_adj_vert(Entity* grid[], byte grid_flags[], int x, int y);
 void beast_explode(Entity* beast, Entity* grid[]);
 Entity* closest_entity(int x, int y, Entity entities[], int num_entities);
 void del_entity(Entity* ent, Entity* grid[]);
@@ -774,36 +776,14 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Ent
       int x = to_x(i);
       int y = to_y(i);
 
-      bool is_anything_above_below = false;
+      bool is_anything_above_below = is_adj_vert(grid, grid_flags, x, y);
+      bool is_anything_left_right = is_adj_horiz(grid, grid_flags, x, y);
 
       // if there's anything above or below, draw vert road
-      if (y > 0) {
-        int above_pos = to_pos(x, y - 1);
-        if (grid_flags[above_pos] & ROAD || (grid[above_pos] && grid[above_pos]->flags & TURRET))
-          is_anything_above_below = true;
-      }
-      if (y < num_blocks_h - 1) {
-        int below_pos = to_pos(x, y + 1);
-        if (grid_flags[below_pos] & ROAD || (grid[below_pos] && grid[below_pos]->flags & TURRET))
-          is_anything_above_below = true;
-      }
-
       if (is_anything_above_below)
         render_sprite(renderer, sprites, 3,1, x, y);
 
       // if there's anything to the left or right, draw horiz road
-      bool is_anything_left_right = false;
-      if (x > 0) {
-        int left_pos = to_pos(x - 1, y);
-        if (grid_flags[left_pos] & ROAD || (grid[left_pos] && grid[left_pos]->flags & TURRET))
-          is_anything_left_right = true;
-      }
-      if (x < num_blocks_w - 1) {
-        int right_pos = to_pos(x + 1, y);
-        if (grid_flags[right_pos] & ROAD || (grid[right_pos] && grid[right_pos]->flags & TURRET))
-          is_anything_left_right = true;
-      }
-
       if (!is_anything_above_below || is_anything_left_right)
         render_sprite(renderer, sprites, 3,2, x, y);    
     }
@@ -1017,6 +997,34 @@ bool is_next_to_wall(Entity* beast, Entity* grid[]) {
       if (grid[pos] && grid[pos]->flags & POWER)
         return true;
     }
+  }
+  return false;
+}
+
+bool is_adj_horiz(Entity* grid[], byte grid_flags[], int x, int y) {
+  if (x > 0) {
+    int left_pos = to_pos(x - 1, y);
+    if (grid_flags[left_pos] & ROAD || (grid[left_pos] && grid[left_pos]->flags & TURRET))
+      return true;
+  }
+  if (x < num_blocks_w - 1) {
+    int right_pos = to_pos(x + 1, y);
+    if (grid_flags[right_pos] & ROAD || (grid[right_pos] && grid[right_pos]->flags & TURRET))
+      return true;
+  }
+  return false;
+}
+
+bool is_adj_vert(Entity* grid[], byte grid_flags[], int x, int y) {
+  if (y > 0) {
+    int above_pos = to_pos(x, y - 1);
+    if (grid_flags[above_pos] & ROAD || (grid[above_pos] && grid[above_pos]->flags & TURRET))
+      return true;
+  }
+  if (y < num_blocks_h - 1) {
+    int below_pos = to_pos(x, y + 1);
+    if (grid_flags[below_pos] & ROAD || (grid[below_pos] && grid[below_pos]->flags & TURRET))
+      return true;
   }
   return false;
 }
