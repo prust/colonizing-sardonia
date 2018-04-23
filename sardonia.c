@@ -11,15 +11,17 @@
 
 typedef unsigned char byte;
 
+// entity flags
 #define DELETED 0x1
 #define BLOCK 0x2
 #define BEAST 0x4
-#define PLAYER 0x8 // unused?
-#define STONE 0x10 // unused?
-#define TURRET 0x20 // unused?
-#define POWER 0x40
-#define SUPER 0x80 // can just be POWER
+#define ROAD 0x8
+#define STONE 0x10 // power stone
+#define TURRET 0x20
+#define POWER 0x40 // power turret
+#define NEST 0x80
 
+// grid flags
 #define WATER 0x1
 
 typedef struct {
@@ -359,7 +361,7 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stone
   for (int i = 0; i < max_beasts; ++i) {
     beasts[i].flags = BEAST;
     if (i == 0)
-      beasts[i].flags |= SUPER;
+      beasts[i].flags |= POWER;
 
     int pos = find_avail_pos(grid, grid_flags);
     beasts[i].x = to_x(pos);
@@ -573,8 +575,8 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
   //           b->flags &= (~DELETED); // clear the DELETED bit
 
   //           // super turrets make super bullets
-  //           if (turret->flags & SUPER)
-  //             b->flags |= SUPER;
+  //           if (turret->flags & POWER)
+  //             b->flags |= POWER;
             
   //           // start in top/left corner
   //           int start_x = turret->x * block_w;
@@ -608,7 +610,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
         continue;
 
       if (is_next_to_wall(&beasts[i], grid)) {
-        if (beasts[i].flags & SUPER || rand() % 100 >= 98) {
+        if (beasts[i].flags & POWER || rand() % 100 >= 98) {
           beast_explode(&beasts[i], grid);
           continue;
         }
@@ -650,7 +652,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
       }
       else if (ent && ent->flags & BEAST) {
         // if it's a super Bullet or NOT a super-beast, "kill the beast!"
-        if (bullets[i].flags & SUPER || !(ent->flags & SUPER)) {
+        if (bullets[i].flags & POWER || !(ent->flags & POWER)) {
           ent->health--;
           if (!ent->health)
             del_entity(ent, grid);
@@ -763,7 +765,7 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, byt
 
     int sprite_x_pos = 0;
     int sprite_y_pos = 1;
-    if (beasts[i].flags & SUPER)
+    if (beasts[i].flags & POWER)
       sprite_x_pos = 2;
     if (grid_flags[to_pos(beasts[i].x, beasts[i].y)] & WATER)
       sprite_y_pos += 1;
@@ -967,7 +969,7 @@ void beast_explode(Entity* beast, Entity* grid[]) {
   int x = beast->x;
   int y = beast->y;
 
-  if (!(beast->flags & SUPER))
+  if (!(beast->flags & POWER))
     del_entity(beast, grid);
 
   for (int dir_x = -1; dir_x <= 1; ++dir_x) {
