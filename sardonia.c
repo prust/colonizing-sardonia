@@ -94,6 +94,7 @@ Image load_img(SDL_Renderer* renderer, char* path);
 void render_img(SDL_Renderer* renderer, Image* img);
 void center_img(Image* img, Viewport* viewport);
 void render_sprite(SDL_Renderer* renderer, SDL_Texture* sprites, int src_x, int src_y, int dest_x, int dest_y);
+void render_corner(SDL_Renderer* renderer, SDL_Texture* sprites, int src_x, int src_y, int dest_x, int dest_y);
 bool is_mouseover(Image* img, int x, int y);
 void error(char* activity);
 
@@ -112,7 +113,7 @@ int block_h = 40;
 int bullet_w = 4;
 int bullet_h = 4;
 double bullet_speed = 300.0; // in px/sec
-int block_density_pct = 5;
+int block_density_pct = 2;
 
 int num_blocks_w = 128; // 2^7
 int num_blocks_h = 128; // 2^7
@@ -642,18 +643,53 @@ void render(SDL_Renderer* renderer, SDL_Texture* sprites, byte grid_flags[], Ent
 
   if (SDL_SetRenderDrawColor(renderer, 145, 103, 47, 255) < 0)
     error("setting land color");
-  for (int i = 0; i < grid_len; ++i) {
-    if (grid_flags[i] & WATER)
-      continue;
 
-    SDL_Rect land_rect = {
-      .x = to_x(i) * block_w - vp.x,
-      .y = to_y(i) * block_h - vp.y,
-      .w = block_w,
-      .h = block_h
-    };
-    if (SDL_RenderFillRect(renderer, &land_rect) < 0)
-      error("filling land rect");
+  for (int i = 0; i < grid_len; ++i) {
+    int x = to_x(i);
+    int y = to_y(i);
+
+    if (grid_flags[i] & WATER) {
+      for (int corner_x = 0; corner_x <= 1; ++corner_x) {
+        for (int corner_y = 0; corner_y <= 1; ++corner_y) {
+          int adj_x = corner_x ? x + 1 : x - 1;
+          int adj_y = corner_y ? y + 1 : y - 1;
+
+          // treat edges as water
+          if (adj_x < 0 || adj_x >= num_blocks_w || adj_y < 0 || adj_y >= num_blocks_h)
+            continue;
+
+          // if there is adjacent land in both directions & diagonally, round the (interior/acute) corner
+          if (!(grid_flags[to_pos(adj_x, y)] & WATER) && !(grid_flags[to_pos(x, adj_y)] & WATER) && !(grid_flags[to_pos(adj_x, adj_y)] & WATER))
+            render_corner(renderer, sprites, 8 + corner_x, 0 + corner_y, x * 2 + corner_x, y * 2 + corner_y);
+        }
+      }
+    }
+    else {
+      // draw each corner, rounded if necessary
+      for (int corner_x = 0; corner_x <= 1; ++corner_x) {
+        for (int corner_y = 0; corner_y <= 1; ++corner_y) {
+          int adj_x = corner_x ? x + 1 : x - 1;
+          int adj_y = corner_y ? y + 1 : y - 1;
+
+          // treat edges as water
+          // if there is no adjacent land in either direction, round the (exterior/obtuse) corner
+          if ((adj_x < 0 || adj_x >= num_blocks_w || grid_flags[to_pos(adj_x, y)] & WATER) &&
+            (adj_y < 0 || adj_y >= num_blocks_h || grid_flags[to_pos(x, adj_y)] & WATER)) {
+              render_corner(renderer, sprites, 6 + corner_x, 0 + corner_y, x * 2 + corner_x, y * 2 + corner_y);
+          }
+          else {
+            SDL_Rect land_rect = {
+              .x = x * block_w + corner_x * block_w/2 - vp.x,
+              .y = y * block_h + corner_y * block_h/2 - vp.y,
+              .w = block_w/2,
+              .h = block_h/2
+            };
+            if (SDL_RenderFillRect(renderer, &land_rect) < 0)
+              error("filling land rect");
+          }
+        }
+      }
+    }
   }
 
   for (int i = 0; i < max_blocks; ++i) {
@@ -1118,6 +1154,13 @@ void center_img(Image* img, Viewport* viewport) {
 void render_sprite(SDL_Renderer* renderer, SDL_Texture* sprites, int src_x, int src_y, int dest_x, int dest_y) {
   SDL_Rect src = {.x = src_x * block_w, .y = src_y * block_h, .w = block_w, .h = block_h};
   SDL_Rect dest = {.x = dest_x * block_w - vp.x, .y = dest_y * block_h - vp.y, .w = block_w, .h = block_h};
+  if (SDL_RenderCopy(renderer, sprites, &src, &dest) < 0)
+    error("renderCopy");
+}
+
+void render_corner(SDL_Renderer* renderer, SDL_Texture* sprites, int src_x, int src_y, int dest_x, int dest_y) {
+  SDL_Rect src = {.x = src_x * block_w/2, .y = src_y * block_h/2, .w = block_w/2, .h = block_h/2};
+  SDL_Rect dest = {.x = dest_x * block_w/2 - vp.x, .y = dest_y * block_h/2 - vp.y, .w = block_w/2, .h = block_h/2};
   if (SDL_RenderCopy(renderer, sprites, &src, &dest) < 0)
     error("renderCopy");
 }
