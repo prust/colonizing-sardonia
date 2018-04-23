@@ -767,10 +767,23 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, byt
   if (SDL_SetRenderDrawColor(renderer, 59, 59, 59, 255) < 0)
     error("setting filled coin bar color");
 
+  double coin_bar_len = 0;
+  if (num_collected_blocks <= 50)
+    coin_bar_len = num_collected_blocks * 5;
+  else if (num_collected_blocks <= 100)
+    coin_bar_len = 50.0 * 5.0 + (num_collected_blocks - 50.0) * 2.5;
+  else if (num_collected_blocks <= 150)
+    coin_bar_len = 50.0 * 5.0 + 100.0 * 2.5 + (num_collected_blocks - 100.0) * 1.25;
+  else if (num_collected_blocks <= 200)
+    coin_bar_len = 50.0 * 5.0 + 100.0 * 2.5 + 150.0 * 1.25 + (num_collected_blocks - 150.0) * 0.625;
+  else
+    coin_bar_len = 50.0 * 5.0 + 100.0 * 2.5 + 150 * 0.625;
+  // TODO: fill this out more & make it programmatic
+
   SDL_Rect coin_bar_rect = {
     .x = control_x + 10,
     .y = 60,
-    .w = num_collected_blocks * 5,
+    .w = (int)coin_bar_len,
     .h = 5
   };
   if (SDL_RenderFillRect(renderer, &coin_bar_rect) < 0)
