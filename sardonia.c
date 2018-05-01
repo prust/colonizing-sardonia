@@ -134,10 +134,12 @@ int grid_len;
 unsigned int last_move_time = 0;
 int beast_move_interval = 500; // ms between beast moves
 unsigned int last_fire_time = 0;
-int turret_fire_interval = 2000; // ms between turret firing
+unsigned int last_mine_time = 0;
+int turret_fire_interval = 1000; // ms between turret firing
+double min_fire_dist = 10;
 int mine_interval = 10000; // ms between mine generating metal
 
-int max_beasts = 100;
+int max_beasts = 50;
 int max_turrets = 500;
 int max_bullets = 100;
 int max_blocks;
@@ -574,65 +576,64 @@ void on_scroll(SDL_Event* evt) {
 
 void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
   // turret firing
-  if (curr_time - last_fire_time >= mine_interval) {
+  if (curr_time - last_mine_time >= mine_interval) {
     for (int i = 0; i < max_turrets; ++i) {
       Entity* turret = &turrets[i];
       if (!(turret->flags & DELETED))
         num_collected_blocks++;
     }
-    last_fire_time = curr_time;
+    last_mine_time = curr_time;
   }
 
-  // if (curr_time - last_fire_time >= turret_fire_interval) {
-  //   for (int i = 0; i < max_turrets; ++i) {
-  //     Entity* turret = &turrets[i];
-  //     if (turret->flags & DELETED)
-  //       continue;
+  if (curr_time - last_fire_time >= turret_fire_interval) {
+    for (int i = 0; i < max_turrets; ++i) {
+      Entity* turret = &turrets[i];
+      if (turret->flags & DELETED)
+        continue;
 
-  //     // only turrets that are part of an enclosure can fire
-  //     int pos = to_pos(turret->x, turret->y);
-  //     if (!(turret->flags & POWER))
-  //       continue;
+      int pos = to_pos(turret->x, turret->y);
+      Entity* beast = closest_entity(turret->x, turret->y, beasts, max_beasts);
+      if (beast) {
+        double dist = calc_dist(beast->x, beast->y, turret->x, turret->y);
+        if (dist > min_fire_dist)
+          continue;
 
-  //     Entity* beast = closest_entity(turret->x, turret->y, beasts, max_beasts);
-  //     if (beast) {
-  //       double dist = calc_dist(beast->x, beast->y, turret->x, turret->y);
-  //       // dividing by the distance gives us a normalized 1-unit vector
-  //       double dx = (beast->x - turret->x) / dist;
-  //       double dy = (beast->y - turret->y) / dist;
-  //       for (int j = 0; j < max_bullets; ++j) {
-  //         Bullet* b = &bullets[j];
-  //         if (b->flags & DELETED) {
-  //           b->flags &= (~DELETED); // clear the DELETED bit
+        // dividing by the distance gives us a normalized 1-unit vector
+        double dx = (beast->x - turret->x) / dist;
+        double dy = (beast->y - turret->y) / dist;
+        for (int j = 0; j < max_bullets; ++j) {
+          Bullet* b = &bullets[j];
+          if (b->flags & DELETED) {
+            b->flags &= (~DELETED); // clear the DELETED bit
 
-  //           // super turrets make super bullets
-  //           if (turret->flags & POWER)
-  //             b->flags |= POWER;
+            // super turrets make super bullets
+            if (turret->flags & POWER)
+              b->flags |= POWER;
             
-  //           // start in top/left corner
-  //           int start_x = turret->x * block_w;
-  //           int start_y = turret->y * block_h;
-  //           if (dx > 0)
-  //             start_x += block_w;
-  //           else
-  //             start_x -= 1; // so it's not on top of itself
-  //           if (dy > 0)
-  //             start_y += block_h;
-  //           else
-  //             start_y -= 1; // so it's not on top of itself
+            // start in top/left corner
+            int start_x = turret->x * block_w;
+            int start_y = turret->y * block_h;
+            if (dx > 0)
+              start_x += block_w;
+            else
+              start_x -= 1; // so it's not on top of itself
+            if (dy > 0)
+              start_y += block_h;
+            else
+              start_y -= 1; // so it's not on top of itself
 
-  //           b->x = start_x;
-  //           b->y = start_y;
-  //           b->dx = dx;
-  //           b->dy = dy;
-  //           break;
-  //         }
-  //       }
-  //     }
-  //     // TODO: determine when max_bullets is exceeded & notify player?
-  //   }
-  //   last_fire_time = curr_time;
-  // }
+            b->x = start_x;
+            b->y = start_y;
+            b->dx = dx;
+            b->dy = dy;
+            break;
+          }
+        }
+      }
+      // TODO: determine when max_bullets is exceeded & notify player?
+    }
+    last_fire_time = curr_time;
+  }
 
   // beast moving
   if (curr_time - last_move_time >= beast_move_interval) {
