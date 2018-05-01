@@ -81,6 +81,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
 void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]);
 
 bool is_next_to_wall(Entity* beast, Entity* grid[]);
+bool is_ent_adj(Entity* ent1, Entity* ent2);
 bool is_adj(Entity* grid[], byte grid_flags[], int x, int y);
 bool is_adj_horiz(Entity* grid[], byte grid_flags[], int x, int y);
 bool is_adj_vert(Entity* grid[], byte grid_flags[], int x, int y);
@@ -89,7 +90,8 @@ Entity* closest_entity(int x, int y, Entity entities[], int num_entities);
 void del_entity(Entity* ent, Entity* grid[]);
 void update_powered_turrets(Entity* grid[], Entity power_stones[]);
 void set_powered(Entity* grid[], int x, int y);
-int get_move_pos(Entity* beast, Entity turrets[], Entity* grid[]);
+int calc_beast_move(Entity* beast, Entity* closest_turret, Entity* grid[]);
+void inflict_damage(Entity* ent, Entity* grid[]);
 
 // generic functions
 void toggle_fullscreen(SDL_Window *win);
@@ -116,6 +118,7 @@ int num_blocks_per_refurb = 15; // discount if you "refurbish" an existing block
 int num_blocks_per_bridge = 50;
 int attack_dist = 30; // how close a beast has to be before he moves towards you
 byte beast_health = 3;
+byte fortress_health = 3;
 
 int block_w = 40;
 int block_h = 40;
@@ -525,6 +528,7 @@ void place_entity(int x, int y, Entity* grid[], byte grid_flags[], Entity turret
         
         num_collected_blocks -= num_required_blocks;
         turrets[i].flags &= (~DELETED); // clear deleted bit
+        turrets[i].health = fortress_health;
         set_xy(&turrets[i], grid, x, y);
         update_powered_turrets(grid, power_stones);
         break;
@@ -633,23 +637,44 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
   // beast moving
   if (curr_time - last_move_time >= beast_move_interval) {
     for (int i = 0; i < max_beasts; ++i) {
-      if (beasts[i].flags & DELETED)
+      Entity* beast = &beasts[i];
+      if (beast->flags & DELETED)
         continue;
 
-      if (is_next_to_wall(&beasts[i], grid)) {
-        if (beasts[i].flags & POWER || rand() % 100 >= 98) {
-          beast_explode(&beasts[i], grid);
+      if (is_next_to_wall(beast, grid)) {
+        if (beast->flags & POWER || rand() % 100 >= 98) {
+          beast_explode(beast, grid);
           continue;
         }
       }
 
-      int dest_pos = get_move_pos(&beasts[i], turrets, grid);
+      Entity* closest_turret = NULL;
+      double closest_dist = attack_dist;
+
+      for (int i = 0; i < max_turrets; ++i) {
+        if (turrets[i].flags & DELETED)
+          continue;
+
+        double dist = calc_dist(turrets[i].x, turrets[i].y, beast->x, beast->y);
+        if (dist < closest_dist) {
+          closest_dist = dist;
+          closest_turret = &turrets[i];
+        }
+      }
+
+      if (closest_turret && is_ent_adj(closest_turret, beast)) {
+        inflict_damage(closest_turret, grid);
+        if (closest_turret->flags & DELETED)
+          closest_turret = NULL;
+      }
+      
+      int dest_pos = calc_beast_move(beast, closest_turret, grid);
 
       // if the beast is surrounded by blocks & has nowhere to move, it blows up
       if (dest_pos == -1)
-        beast_explode(&beasts[i], grid);
+        beast_explode(beast, grid);
       else
-        move(&beasts[i], grid, to_x(dest_pos), to_y(dest_pos));
+        move(beast, grid, to_x(dest_pos), to_y(dest_pos));
     }
     last_move_time = curr_time;
   }
@@ -679,11 +704,9 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
       }
       else if (ent && ent->flags & BEAST) {
         // if it's a super Bullet or NOT a super-beast, "kill the beast!"
-        if (bullets[i].flags & POWER || !(ent->flags & POWER)) {
-          ent->health--;
-          if (!ent->health)
-            del_entity(ent, grid);
-        }
+        if (bullets[i].flags & POWER || !(ent->flags & POWER))
+          inflict_damage(ent, grid);
+        
         bullets[i].flags |= DELETED;
       }
     }
@@ -1017,6 +1040,10 @@ bool is_next_to_wall(Entity* beast, Entity* grid[]) {
   return false;
 }
 
+bool is_ent_adj(Entity* ent1, Entity* ent2) {
+  return abs(ent1->x - ent2->x) <= 1 && abs(ent1->y - ent2->y) <= 1;
+}
+
 bool is_adj(Entity* grid[], byte grid_flags[], int x, int y) {
   return is_adj_horiz(grid, grid_flags, x, y) || is_adj_vert(grid, grid_flags, x, y);
 }
@@ -1128,35 +1155,20 @@ void set_powered(Entity* grid[], int x, int y) {
   set_powered(grid, x, y - 1);
 }
 
-int get_move_pos(Entity* beast, Entity turrets[], Entity* grid[]) {
-  Entity* turret = NULL;
-  double closest_dist = attack_dist;
-
-  for (int i = 0; i < max_turrets; ++i) {
-    if (turrets[i].flags & DELETED)
-      continue;
-
-    double dist = calc_dist(turrets[i].x, turrets[i].y, beast->x, beast->y);
-    if (dist < closest_dist) {
-      closest_dist = dist;
-      turret = &turrets[i];
-    }
-  }
-
-
+int calc_beast_move(Entity* beast, Entity* closest_turret, Entity* grid[]) {
   int x = beast->x;
   int y = beast->y;
 
   int dir_x = 0;
   int dir_y = 0;
-  if (turret && turret->x < x)
+  if (closest_turret && closest_turret->x < x)
     dir_x = -1;
-  else if (turret && turret->x > x)
+  else if (closest_turret && closest_turret->x > x)
     dir_x = 1;
 
-  if (turret && turret->y < y)
+  if (closest_turret && closest_turret->y < y)
     dir_y = -1;
-  else if (turret && turret->y > y)
+  else if (closest_turret && closest_turret->y > y)
     dir_y = 1;
 
   bool found_direction = true;
@@ -1164,11 +1176,12 @@ int get_move_pos(Entity* beast, Entity turrets[], Entity* grid[]) {
   // a quarter of the time we want them to move randomly
   // this keeps them from being too deterministic & from getting stuck
   // behind rocks, etc
-  bool move_randomly = !turret || rand() % 100 > 75;
+  bool move_randomly = !closest_turret || rand() % 100 > 75;
 
-  // the beast will "attack" the turret on this move; don't move away
-  if (turret && abs(turret->x - x) <= 1 && abs(turret->y - y) <= 1)
-    return to_pos(x, y);
+
+  // if we're already next to the turret, we can't move any closer
+  if (closest_turret && is_ent_adj(closest_turret, beast))
+    move_randomly = true;
   
   // try to move towards the fortress, if possible
   if (!move_randomly && dir_x && dir_y && in_bounds(x + dir_x, y + dir_y) && !grid[to_pos(x + dir_x, y + dir_y)]) {
@@ -1262,6 +1275,12 @@ int get_move_pos(Entity* beast, Entity turrets[], Entity* grid[]) {
     return -1;
   else
     return to_pos(x, y);
+}
+
+void inflict_damage(Entity* ent, Entity* grid[]) {
+  ent->health--;
+  if (!ent->health)
+    del_entity(ent, grid);
 }
 
 
