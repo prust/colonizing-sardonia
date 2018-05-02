@@ -68,7 +68,7 @@ bool is_in_grid(int x, int y);
 
 // game-specific functions
 void play_level(SDL_Window* window, SDL_Renderer* renderer);
-void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity beasts[], Entity turrets[], Bullet bullets[]);
+void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity beasts[], Entity turrets[], Entity nests[], Bullet bullets[]);
 void gen_water(byte grid_flags[], short top_left, short top_right, short bottom_left, short bottom_right, int x, int y, int w);
 void remove_sm_islands(byte grid_flags[]);
 void remove_sm_lakes(byte grid_flags[]);
@@ -77,8 +77,8 @@ void on_mousedown(SDL_Event* evt, Entity* grid[], byte grid_flags[], Entity turr
 void place_entity(int x, int y, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]);
 void on_keydown(SDL_Event* evt, Entity* grid[], bool* is_gameover, bool* is_paused, SDL_Window* window);
 void on_scroll(SDL_Event* evt);
-void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Bullet bullets[]);
-void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]);
+void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Entity nests[], Bullet bullets[]);
+void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Entity nests[], Bullet bullets[]);
 
 bool is_next_to_wall(Entity* beast, Entity* grid[]);
 bool is_ent_adj(Entity* ent1, Entity* ent2);
@@ -90,7 +90,7 @@ Entity* closest_entity(int x, int y, Entity entities[], int num_entities);
 void del_entity(Entity* ent, Entity* grid[]);
 void update_powered_turrets(Entity* grid[], Entity power_stones[]);
 void set_powered(Entity* grid[], int x, int y);
-int calc_beast_move(Entity* beast, Entity* closest_turret, Entity* grid[]);
+int choose_adj_pos(Entity* beast, Entity* closest_turret, Entity* grid[]);
 void inflict_damage(Entity* ent, Entity* grid[]);
 
 // generic functions
@@ -119,6 +119,7 @@ int num_blocks_per_bridge = 50;
 int attack_dist = 30; // how close a beast has to be before he moves towards you
 byte beast_health = 3;
 byte fortress_health = 3;
+byte nest_health = 255;
 
 int block_w = 40;
 int block_h = 40;
@@ -131,19 +132,24 @@ int num_blocks_w = 128; // 2^7
 int num_blocks_h = 128; // 2^7
 int grid_len;
 
+double min_fire_dist = 10;
+
 unsigned int last_move_time = 0;
 int beast_move_interval = 500; // ms between beast moves
 unsigned int last_fire_time = 0;
-unsigned int last_mine_time = 0;
 int turret_fire_interval = 1000; // ms between turret firing
-double min_fire_dist = 10;
+unsigned int last_mine_time = 0;
 int mine_interval = 10000; // ms between mine generating metal
+unsigned int last_spawn_time = 0;
+int beast_spawn_interval = 10000;
 
-int max_beasts = 50;
+int max_beasts = 500;
+int num_starting_beasts = 50;
 int max_turrets = 500;
 int max_bullets = 100;
 int max_blocks;
 int max_power_stones = 10;
+int max_nests = 10;
 
 SDL_Rect road_btn = {.x = 0, .y = 5, .w = 50, .h = 50};
 SDL_Rect fortress_btn = {.x = 0, .y = 5, .w = 50, .h = 50};
@@ -260,10 +266,11 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
   Entity power_stones[max_power_stones];
   Entity beasts[max_beasts];
   Entity turrets[max_turrets];
+  Entity nests[max_nests];
   
   Bullet bullets[max_bullets];
 
-  load(grid, grid_flags, blocks, power_stones, beasts, turrets, bullets);
+  load(grid, grid_flags, blocks, power_stones, beasts, turrets, nests, bullets);
 
   Image ui_bar_img = load_img(renderer, "images/ui-bar.png");
   SDL_Texture* sprites = IMG_LoadTexture(renderer, "images/spritesheet.png");
@@ -325,8 +332,8 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
       }
     }
 
-    update(dt, curr_time, grid, turrets, beasts, bullets);
-    render(renderer, &ui_bar_img, sprites, grid, grid_flags, blocks, power_stones, turrets, beasts, bullets);
+    update(dt, curr_time, grid, turrets, beasts, nests, bullets);
+    render(renderer, &ui_bar_img, sprites, grid, grid_flags, blocks, power_stones, turrets, beasts, nests, bullets);
 
     SDL_Delay(10);
   }
@@ -334,7 +341,7 @@ void play_level(SDL_Window* window, SDL_Renderer* renderer) {
   SDL_DestroyTexture(sprites);
 }
 
-void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity beasts[], Entity turrets[], Bullet bullets[]) {
+void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity beasts[], Entity turrets[], Entity nests[], Bullet bullets[]) {
   // have to manually init b/c C doesn't allow initializing VLAs w/ {0}
   for (int i = 0; i < grid_len; ++i) {
     grid[i] = NULL;
@@ -372,16 +379,31 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stone
     if (i == 0)
       beasts[i].flags |= POWER;
 
+    if (i < num_starting_beasts) {
+      int pos = find_avail_pos(grid, grid_flags);
+      beasts[i].x = to_x(pos);
+      beasts[i].y = to_y(pos);
+      beasts[i].health = beast_health;
+      grid[pos] = &beasts[i];
+    }
+    else {
+      beasts[i].flags |= DELETED;
+    }
+  }
+
+  for (int i = 0; i < max_nests; ++i) {
+    nests[i].flags = NEST; // BLOCK?
     int pos = find_avail_pos(grid, grid_flags);
-    beasts[i].x = to_x(pos);
-    beasts[i].y = to_y(pos);
-    beasts[i].health = beast_health;
-    grid[pos] = &beasts[i];
+    nests[i].x = to_x(pos);
+    nests[i].y = to_y(pos);
+    nests[i].health = nest_health;
+    grid[pos] = &nests[i];
   }
 
   // precreate all turrets/bullets as deleted
   for (int i = 0; i < max_turrets; ++i)
     turrets[i].flags = BLOCK | TURRET | DELETED;
+
   for (int i = 0; i < max_bullets; ++i)
     bullets[i].flags = DELETED;
 }
@@ -574,7 +596,7 @@ void on_scroll(SDL_Event* evt) {
   vp.y = clamp(vp.y + dy, 0, num_blocks_h * block_h);
 }
 
-void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
+void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Entity nests[], Bullet bullets[]) {
   // turret firing
   if (curr_time - last_mine_time >= mine_interval) {
     for (int i = 0; i < max_turrets; ++i) {
@@ -635,6 +657,30 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
     last_fire_time = curr_time;
   }
 
+  // beast spawning
+  if (curr_time - last_spawn_time >= beast_spawn_interval) {
+    for (int i = 0; i < max_nests; ++i) {
+      Entity* nest = &nests[i];
+      if (nest->flags & DELETED)
+        continue;
+
+      int spawn_pos = choose_adj_pos(nest, NULL, grid);
+      if (spawn_pos == -1)
+        continue;
+
+      for (int i = 0; i < max_beasts; ++i) {
+        Entity* beast = &beasts[i];
+        // find deleted beast & revive it
+        if (beast->flags & DELETED) {
+          beast->flags &= (~DELETED); // clear deleted bit
+          set_pos(beast, grid, spawn_pos);
+          break;
+        }
+      }
+    }
+    last_spawn_time = curr_time;
+  }
+
   // beast moving
   if (curr_time - last_move_time >= beast_move_interval) {
     for (int i = 0; i < max_beasts; ++i) {
@@ -669,7 +715,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
           closest_turret = NULL;
       }
       
-      int dest_pos = calc_beast_move(beast, closest_turret, grid);
+      int dest_pos = choose_adj_pos(beast, closest_turret, grid);
 
       // if the beast is surrounded by blocks & has nowhere to move, it blows up
       if (dest_pos == -1)
@@ -714,7 +760,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
   }
 }
 
-void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Bullet bullets[]) {
+void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Entity nests[], Bullet bullets[]) {
   // set BG color
   if (SDL_SetRenderDrawColor(renderer, 44, 34, 30, 255) < 0)
     error("setting bg color");
@@ -1156,7 +1202,7 @@ void set_powered(Entity* grid[], int x, int y) {
   set_powered(grid, x, y - 1);
 }
 
-int calc_beast_move(Entity* beast, Entity* closest_turret, Entity* grid[]) {
+int choose_adj_pos(Entity* beast, Entity* closest_turret, Entity* grid[]) {
   int x = beast->x;
   int y = beast->y;
 
