@@ -125,7 +125,7 @@ int block_w = 40;
 int block_h = 40;
 int bullet_w = 4;
 int bullet_h = 4;
-double bullet_speed = 300.0; // in px/sec
+double bullet_speed = 600.0; // in px/sec
 int block_density_pct = 4;
 
 int num_blocks_w = 128; // 2^7
@@ -144,12 +144,12 @@ unsigned int last_spawn_time = 0;
 int beast_spawn_interval = 10000;
 
 int max_beasts = 500;
-int num_starting_beasts = 50;
+int num_starting_beasts = 25;
 int max_turrets = 500;
 int max_bullets = 100;
 int max_blocks;
 int max_power_stones = 10;
-int max_nests = 10;
+int max_nests = 3;
 
 SDL_Rect road_btn = {.x = 0, .y = 5, .w = 50, .h = 50};
 SDL_Rect fortress_btn = {.x = 0, .y = 5, .w = 50, .h = 50};
@@ -376,8 +376,6 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stone
 
   for (int i = 0; i < max_beasts; ++i) {
     beasts[i].flags = BEAST;
-    if (i == 0)
-      beasts[i].flags |= POWER;
 
     if (i < num_starting_beasts) {
       int pos = find_avail_pos(grid, grid_flags);
@@ -637,10 +635,15 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
             int start_y = turret->y * block_h;
             if (dx > 0)
               start_x += block_w;
+            else if (dx == 0)
+              start_x += block_w / 2;
             else
               start_x -= 1; // so it's not on top of itself
+
             if (dy > 0)
               start_y += block_h;
+            else if (dy == 0)
+              start_y += block_h / 2;
             else
               start_y -= 1; // so it's not on top of itself
 
@@ -750,10 +753,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
         continue;
       }
       else if (ent && ent->flags & BEAST) {
-        // if it's a super Bullet or NOT a super-beast, "kill the beast!"
-        if (bullets[i].flags & POWER || !(ent->flags & POWER))
-          inflict_damage(ent, grid);
-        
+        inflict_damage(ent, grid);        
         bullets[i].flags |= DELETED;
       }
     }
@@ -822,7 +822,7 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Ent
     if (blocks[i].flags & DELETED)
       continue;
 
-    render_sprite(renderer, sprites, 1,1, blocks[i].x,blocks[i].y);
+    render_sprite(renderer, sprites, 1,3, blocks[i].x,blocks[i].y);
   }
 
   for (int i = 0; i < max_power_stones; ++i)
@@ -875,25 +875,36 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Ent
     }
   }
 
-  // draw beasts & super-beasts
+  // draw beasts in & out of water
   for (int i = 0; i < max_beasts; ++i) {
     if (beasts[i].flags & DELETED)
       continue;
 
     int sprite_x_pos = 0;
     int sprite_y_pos = 1;
-    if (beasts[i].flags & POWER)
-      sprite_x_pos = 2;
     if (grid_flags[to_pos(beasts[i].x, beasts[i].y)] & WATER)
       sprite_y_pos += 1;
+    if (beasts[i].health == 2)
+      sprite_x_pos = 1;
+    else if (beasts[i].health == 1)
+      sprite_x_pos = 2;
 
     render_sprite(renderer, sprites, sprite_x_pos,sprite_y_pos, beasts[i].x, beasts[i].y);
+  }
+
+  // draw nests
+  for (int i = 0; i < max_nests; ++i) {
+    Entity* nest = &nests[i];
+    if (nest->flags & DELETED)
+      continue;
+
+    render_sprite(renderer, sprites, 4,1, nest->x, nest->y);
   }
 
   // draw bridges
   for (int i = 0; i < grid_len; ++i)
     if (grid_flags[i] & ROAD && grid_flags[i] & WATER)
-      render_sprite(renderer, sprites, 1,2, to_x(i), to_y(i));
+      render_sprite(renderer, sprites, 0,3, to_x(i), to_y(i));
 
   // header
   int text_px_size = 2;
