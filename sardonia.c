@@ -703,6 +703,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
         // find deleted beast & revive it
         if (beast->flags & DELETED) {
           beast->flags &= (~DELETED); // clear deleted bit
+          beast->health = beast_health;
           set_pos(beast, grid, spawn_pos);
           break;
         }
@@ -1364,7 +1365,7 @@ int choose_adj_pos(Entity* beast, Entity* closest_turret, Entity* grid[]) {
 
 void inflict_damage(Entity* ent, Entity* grid[]) {
   ent->health--;
-  if (!ent->health)
+  if (ent->health <= 0)
     del_entity(ent, grid);
 }
 
