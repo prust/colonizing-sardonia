@@ -14,7 +14,7 @@ typedef unsigned char byte;
 // entity flags
 #define DELETED 0x1
 #define BLOCK 0x2
-#define BEAST 0x4
+#define ENEMY 0x4
 #define NEST 0x8
 #define STONE 0x10 // power stone
 #define TURRET 0x20
@@ -119,7 +119,7 @@ int num_blocks_per_bridge = 50;
 int attack_dist = 30; // how close a beast has to be before he moves towards you
 byte beast_health = 3;
 byte fortress_health = 3;
-byte nest_health = 255;
+byte nest_health = 25;
 
 int block_w = 40;
 int block_h = 40;
@@ -375,7 +375,7 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stone
   }
 
   for (int i = 0; i < max_beasts; ++i) {
-    beasts[i].flags = BEAST;
+    beasts[i].flags = ENEMY;
 
     if (i < num_starting_beasts) {
       int pos = find_avail_pos(grid, grid_flags);
@@ -390,7 +390,7 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stone
   }
 
   for (int i = 0; i < max_nests; ++i) {
-    nests[i].flags = NEST; // BLOCK?
+    nests[i].flags = ENEMY;
     int pos = find_avail_pos(grid, grid_flags);
     nests[i].x = to_x(pos);
     nests[i].y = to_y(pos);
@@ -613,46 +613,73 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
 
       int pos = to_pos(turret->x, turret->y);
       Entity* beast = closest_entity(turret->x, turret->y, beasts, max_beasts);
-      if (beast) {
-        double dist = calc_dist(beast->x, beast->y, turret->x, turret->y);
-        if (dist > min_fire_dist)
-          continue;
+      double beast_dist = -1;
+      if (beast)
+        beast_dist = calc_dist(beast->x, beast->y, turret->x, turret->y);
 
-        // dividing by the distance gives us a normalized 1-unit vector
-        double dx = (beast->x - turret->x) / dist;
-        double dy = (beast->y - turret->y) / dist;
-        for (int j = 0; j < max_bullets; ++j) {
-          Bullet* b = &bullets[j];
-          if (b->flags & DELETED) {
-            b->flags &= (~DELETED); // clear the DELETED bit
+      Entity* nest = closest_entity(turret->x, turret->y, nests, max_nests);
+      double nest_dist = -1;
+      if (nest)
+        nest_dist = calc_dist(nest->x, nest->y, turret->x, turret->y);
+      
+      Entity* enemy;
+      double dist;
+      if (beast && nest) {
+        if (beast_dist < nest_dist) {
+          enemy = beast;
+          dist = beast_dist;
+        }
+        else {
+          enemy = nest;
+          dist = nest_dist;
+        }
+      }
+      else if (beast) {
+        enemy = beast;
+        dist = beast_dist;
+      }
+      else if (nest) {
+        enemy = nest;
+        dist = nest_dist;
+      }
+      else {
+        continue;
+      }
 
-            // super turrets make super bullets
-            if (turret->flags & POWER)
-              b->flags |= POWER;
-            
-            // start in top/left corner
-            int start_x = turret->x * block_w;
-            int start_y = turret->y * block_h;
-            if (dx > 0)
-              start_x += block_w;
-            else if (dx == 0)
-              start_x += block_w / 2;
-            else
-              start_x -= 1; // so it's not on top of itself
+      // dividing by the distance gives us a normalized 1-unit vector
+      double dx = (enemy->x - turret->x) / dist;
+      double dy = (enemy->y - turret->y) / dist;
+      for (int j = 0; j < max_bullets; ++j) {
+        Bullet* b = &bullets[j];
+        if (b->flags & DELETED) {
+          b->flags &= (~DELETED); // clear the DELETED bit
 
-            if (dy > 0)
-              start_y += block_h;
-            else if (dy == 0)
-              start_y += block_h / 2;
-            else
-              start_y -= 1; // so it's not on top of itself
+          // super turrets make super bullets
+          if (turret->flags & POWER)
+            b->flags |= POWER;
+          
+          // start in top/left corner
+          int start_x = turret->x * block_w;
+          int start_y = turret->y * block_h;
+          if (dx > 0)
+            start_x += block_w;
+          else if (dx == 0)
+            start_x += block_w / 2;
+          else
+            start_x -= 1; // so it's not on top of itself
 
-            b->x = start_x;
-            b->y = start_y;
-            b->dx = dx;
-            b->dy = dy;
-            break;
-          }
+          if (dy > 0)
+            start_y += block_h;
+          else if (dy == 0)
+            start_y += block_h / 2;
+          else
+            start_y -= 1; // so it's not on top of itself
+
+          b->x = start_x;
+          b->y = start_y;
+          b->dx = dx;
+          b->dy = dy;
+          break;
         }
       }
       // TODO: determine when max_bullets is exceeded & notify player?
@@ -752,7 +779,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
         bullets[i].flags |= DELETED;
         continue;
       }
-      else if (ent && ent->flags & BEAST) {
+      else if (ent && ent->flags & ENEMY) {
         inflict_damage(ent, grid);        
         bullets[i].flags |= DELETED;
       }
