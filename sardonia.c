@@ -116,7 +116,8 @@ int num_blocks_per_road = 3;
 int num_blocks_per_turret = 25; // collect 5 rocks to build 1 turret
 int num_blocks_per_refurb = 15; // discount if you "refurbish" an existing block to build a turret
 int num_blocks_per_bridge = 50;
-int attack_dist = 30; // how close a beast has to be before he moves towards you
+int beast_attack_dist = 30; // how close a beast has to be before he moves towards you
+int fortress_attack_dist = 10; // how close before a turret fires on a beast/nest
 byte beast_health = 3;
 byte fortress_health = 3;
 byte nest_health = 25;
@@ -595,7 +596,7 @@ void on_scroll(SDL_Event* evt) {
 }
 
 void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Entity nests[], Bullet bullets[]) {
-  // turret firing
+  // fortress mining
   if (curr_time - last_mine_time >= mine_interval) {
     for (int i = 0; i < max_turrets; ++i) {
       Entity* turret = &turrets[i];
@@ -605,6 +606,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
     last_mine_time = curr_time;
   }
 
+  // fortress firing
   if (curr_time - last_fire_time >= turret_fire_interval) {
     for (int i = 0; i < max_turrets; ++i) {
       Entity* turret = &turrets[i];
@@ -645,6 +647,9 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
       else {
         continue;
       }
+
+      if (dist > fortress_attack_dist)
+        continue;
 
       // dividing by the distance gives us a normalized 1-unit vector
       double dx = (enemy->x - turret->x) / dist;
@@ -727,7 +732,7 @@ void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[],
       }
 
       Entity* closest_turret = NULL;
-      double closest_dist = attack_dist;
+      double closest_dist = beast_attack_dist;
 
       for (int i = 0; i < max_turrets; ++i) {
         if (turrets[i].flags & DELETED)
