@@ -23,6 +23,7 @@ typedef unsigned char byte;
 // grid flags
 #define WATER 0x1
 #define ROAD 0x2 // roads & bridges
+#define PROCESSED 0x4 // temp flag for flood fills & the like
 
 typedef struct {
   byte flags;
@@ -77,6 +78,7 @@ void on_mousedown(SDL_Event* evt, Entity* grid[], byte grid_flags[], Entity turr
 void place_entity(int x, int y, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]);
 void on_keydown(SDL_Event* evt, Entity* grid[], bool* is_gameover, bool* is_paused, SDL_Window* window);
 void on_scroll(SDL_Event* evt);
+void scroll_to(int x, int y);
 void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Entity nests[], Bullet bullets[]);
 void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stones[], Entity turrets[], Entity beasts[], Entity nests[], Bullet bullets[]);
 
@@ -92,6 +94,8 @@ void update_powered_turrets(Entity* grid[], Entity power_stones[]);
 void set_powered(Entity* grid[], int x, int y);
 int choose_adj_pos(Entity* beast, Entity* closest_turret, Entity* grid[]);
 void inflict_damage(Entity* ent, Entity* grid[]);
+int calc_island_size(int pos, byte grid_flags[]);
+void flood_fill_land(int pos, byte grid_flags[]);
 
 // generic functions
 void toggle_fullscreen(SDL_Window *win);
@@ -349,9 +353,36 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stone
     grid_flags[i] = 0;
   }
 
+  // precreate all turrets/bullets as deleted (has to be before placing the starting fortress)
+  for (int i = 0; i < max_turrets; ++i)
+    turrets[i].flags = BLOCK | TURRET | DELETED;
+
+  for (int i = 0; i < max_bullets; ++i)
+    bullets[i].flags = DELETED;
+
   gen_water(grid_flags, 0, 0, 0, 0, 0,0, num_blocks_w);
   remove_sm_islands(grid_flags);
   remove_sm_lakes(grid_flags);
+
+  int num_tries = 0;
+  int max_size = 0;
+  int start_pos = -1;
+  for (int i = 0; i < 30; ++i) {
+    int pos = find_avail_pos(grid, grid_flags);
+    int size = calc_island_size(pos, grid_flags);
+    if (size > max_size) {
+      start_pos = pos;
+      max_size = size;
+    }
+  }
+
+  // build a starting fortress
+  int start_x = to_x(start_pos);
+  int start_y = to_y(start_pos);
+  place_entity(start_x, start_y, grid, grid_flags, turrets, power_stones);
+
+  // scroll so that the starting pos is in the center
+  scroll_to(start_x * block_w - vp.w / 2, start_y * block_h - vp.h / 2);
 
   // add power stones to the playing field
   for (int i = 0; i < max_power_stones; ++i) {
@@ -398,13 +429,6 @@ void load(Entity* grid[], byte grid_flags[], Entity blocks[], Entity power_stone
     nests[i].health = nest_health;
     grid[pos] = &nests[i];
   }
-
-  // precreate all turrets/bullets as deleted
-  for (int i = 0; i < max_turrets; ++i)
-    turrets[i].flags = BLOCK | TURRET | DELETED;
-
-  for (int i = 0; i < max_bullets; ++i)
-    bullets[i].flags = DELETED;
 }
 
 void gen_water(byte grid_flags[], short top_left, short top_right, short bottom_left, short bottom_right, int x, int y, int w) {
@@ -477,11 +501,47 @@ void remove_sm_lakes(byte grid_flags[]) {
   }
 }
 
+int calc_island_size(int pos, byte grid_flags[]) {
+  flood_fill_land(pos, grid_flags);
+
+  // count island tiles & reset PROCESSED bit for whole grid
+  int size = 0;
+  for (int i = 0; i < grid_len; ++i) {
+    if (grid_flags[i] & PROCESSED) {
+      size++;
+      grid_flags[i] &= (~PROCESSED);
+    }
+  }
+  return size;
+}
+
+void flood_fill_land(int pos, byte grid_flags[]) {
+  if (grid_flags[pos] & WATER || grid_flags[pos] & PROCESSED)
+    return;
+
+  grid_flags[pos] |= PROCESSED;
+  int x = to_x(pos);
+  int y = to_y(pos);
+
+  // TODO: create an array of direction vectors & iterate it for this
+  // maybe an array of all 8, and just loop the non-diagonal ones?
+  if (is_in_grid(x + 1, y))
+    flood_fill_land(to_pos(x + 1, y), grid_flags);
+  if (is_in_grid(x, y + 1))
+    flood_fill_land(to_pos(x, y + 1), grid_flags);
+  if (is_in_grid(x - 1, y))
+    flood_fill_land(to_pos(x - 1, y), grid_flags);
+  if (is_in_grid(x, y - 1))
+    flood_fill_land(to_pos(x, y - 1), grid_flags);
+}
+
 void on_mousemove(SDL_Event* evt, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]) {
   if (!(evt->motion.state & SDL_BUTTON_LMASK))
     return;
 
-  place_entity(evt->button.x, evt->button.y, grid, grid_flags, turrets, power_stones);
+  int x = (evt->button.x + vp.x) / block_w;
+  int y = (evt->button.y + vp.y) / block_h;
+  place_entity(x, y, grid, grid_flags, turrets, power_stones);
 }
 
 void on_mousedown(SDL_Event* evt, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]) {
@@ -499,13 +559,13 @@ void on_mousedown(SDL_Event* evt, Entity* grid[], byte grid_flags[], Entity turr
     return;
   }
 
-  place_entity(evt->button.x, evt->button.y, grid, grid_flags, turrets, power_stones);
+  int x = (evt->button.x + vp.x) / block_w;
+  int y = (evt->button.y + vp.y) / block_h;
+  place_entity(x, y, grid, grid_flags, turrets, power_stones);
 }
 
 void place_entity(int x, int y, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]) {
   // try to place a road/fortress/bridge
-  x = (x + vp.x) / block_w;
-  y = (y + vp.y) / block_h;
   int pos = to_pos(x, y);
 
   bool is_refurb = false;
@@ -591,8 +651,12 @@ void on_scroll(SDL_Event* evt) {
   if (evt->wheel.direction == SDL_MOUSEWHEEL_FLIPPED)
     dy = -dy;
 
-  vp.x = clamp(vp.x + dx, 0, num_blocks_w * block_w);
-  vp.y = clamp(vp.y + dy, 0, num_blocks_h * block_h);
+  scroll_to(vp.x + dx, vp.y + dy);
+}
+
+void scroll_to(int x, int y) {
+  vp.x = clamp(x, 0, num_blocks_w * block_w);
+  vp.y = clamp(y, 0, num_blocks_h * block_h);
 }
 
 void update(double dt, unsigned int curr_time, Entity* grid[], Entity turrets[], Entity beasts[], Entity nests[], Bullet bullets[]) {
