@@ -24,6 +24,7 @@ typedef unsigned char byte;
 #define WATER 0x1
 #define ROAD 0x2 // roads & bridges
 #define PROCESSED 0x4 // temp flag for flood fills & the like
+#define EXPLORED 0x8
 
 typedef struct {
   byte flags;
@@ -76,6 +77,7 @@ void remove_sm_lakes(byte grid_flags[]);
 void on_mousemove(SDL_Event* evt, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]);
 void on_mousedown(SDL_Event* evt, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]);
 void place_entity(int x, int y, Entity* grid[], byte grid_flags[], Entity turrets[], Entity power_stones[]);
+void update_explored(int pos, byte grid_flags[]);
 void on_keydown(SDL_Event* evt, Entity* grid[], bool* is_gameover, bool* is_paused, SDL_Window* window);
 void on_scroll(SDL_Event* evt);
 void scroll_to(int x, int y);
@@ -125,6 +127,7 @@ int fortress_attack_dist = 10; // how close before a turret fires on a beast/nes
 byte beast_health = 3;
 byte fortress_health = 3;
 byte nest_health = 25;
+int explored_dist = 6; // how many blocks to show next to "explored" areas
 
 int block_w = 40;
 int block_h = 40;
@@ -614,6 +617,7 @@ void place_entity(int x, int y, Entity* grid[], byte grid_flags[], Entity turret
         turrets[i].health = fortress_health;
         set_xy(&turrets[i], grid, x, y);
         update_powered_turrets(grid, power_stones);
+        update_explored(pos, grid_flags);
         break;
       }
     }
@@ -628,6 +632,17 @@ void place_entity(int x, int y, Entity* grid[], byte grid_flags[], Entity turret
 
     num_collected_blocks -= num_required_blocks;
     grid_flags[pos] |= ROAD; // set road bit
+    update_explored(pos, grid_flags);
+  }
+}
+
+void update_explored(int pos, byte grid_flags[]) {
+  int x = to_x(pos);
+  int y = to_y(pos);
+  for (int i = 0; i < grid_len; ++i) {
+    double dist = calc_dist(x, y, to_x(i), to_y(i));
+    if (dist < explored_dist)
+      grid_flags[i] |= EXPLORED;
   }
 }
 
@@ -1002,6 +1017,38 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Ent
   for (int i = 0; i < grid_len; ++i)
     if (grid_flags[i] & ROAD && grid_flags[i] & WATER)
       render_sprite(renderer, sprites, 0,3, to_x(i), to_y(i));
+
+  // draw black unexplored mask
+  for (int i = 0; i < grid_len; ++i) {
+    if (grid_flags[i] & EXPLORED)
+      continue;
+
+    int x = to_x(i);
+    int y = to_y(i);
+
+    // if adjacent cell is explored, do 50% opacity mask
+    if ((is_in_grid(x + 1, y) && grid_flags[to_pos(x + 1, y)] & EXPLORED) ||
+      (is_in_grid(x - 1, y) && grid_flags[to_pos(x - 1, y)] & EXPLORED) ||
+      (is_in_grid(x, y + 1) && grid_flags[to_pos(x, y + 1)] & EXPLORED) ||
+      (is_in_grid(x, y - 1) && grid_flags[to_pos(x, y - 1)] & EXPLORED)) {
+      if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 125) < 0)
+        error("setting unexplored half-mask");
+    }
+    else {
+      if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255) < 0)
+        error("setting unexplored mask");
+    }
+
+    SDL_Rect unexplored_r = {
+      .x = x * block_w - vp.x,
+      .y = y * block_h - vp.y,
+      .w = block_w,
+      .h = block_h
+    };
+    if (SDL_RenderFillRect(renderer, &unexplored_r) < 0)
+      error("filling unexplored rect");
+  }
+
 
   // header
   int text_px_size = 2;
