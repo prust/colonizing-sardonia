@@ -581,6 +581,8 @@ void place_entity(int x, int y, Entity* grid[], byte grid_flags[], Entity turret
   else if (selected_btn == &fortress_btn) {
     is_refurb = grid[pos] && grid[pos]->flags == BLOCK;
     num_required_blocks = is_refurb ? num_blocks_per_refurb : num_blocks_per_turret;
+    if (grid_flags[pos] & WATER)
+      return; // can't build a fortress on water
   }
   else if (selected_btn == &bridge_btn) {
     num_required_blocks = num_blocks_per_bridge;
