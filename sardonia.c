@@ -87,8 +87,10 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Ent
 bool is_next_to_wall(Entity* beast, Entity* grid[]);
 bool is_ent_adj(Entity* ent1, Entity* ent2);
 bool is_adj(Entity* grid[], byte grid_flags[], int x, int y);
-bool is_adj_horiz(Entity* grid[], byte grid_flags[], int x, int y);
-bool is_adj_vert(Entity* grid[], byte grid_flags[], int x, int y);
+bool is_adj_left(Entity* grid[], byte grid_flags[], int x, int y, bool road_only);
+bool is_adj_right(Entity* grid[], byte grid_flags[], int x, int y, bool road_only);
+bool is_adj_above(Entity* grid[], byte grid_flags[], int x, int y, bool road_only);
+bool is_adj_below(Entity* grid[], byte grid_flags[], int x, int y, bool road_only);
 void beast_explode(Entity* beast, Entity* grid[]);
 Entity* closest_entity(int x, int y, Entity entities[], int num_entities);
 void del_entity(Entity* ent, Entity* grid[]);
@@ -976,16 +978,48 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Ent
       int x = to_x(i);
       int y = to_y(i);
 
-      bool is_anything_above_below = is_adj_vert(grid, grid_flags, x, y);
-      bool is_anything_left_right = is_adj_horiz(grid, grid_flags, x, y);
+      bool is_above = is_adj_above(grid, grid_flags, x, y, true);
+      bool is_below = is_adj_below(grid, grid_flags, x, y, true);
+      bool is_left = is_adj_left(grid, grid_flags, x, y, true);
+      bool is_right = is_adj_right(grid, grid_flags, x, y, true);
 
-      // if there's anything above or below, draw vert road
-      if (is_anything_above_below)
-        render_sprite(renderer, sprites, 3,1, x, y);
-
-      // if there's anything to the left or right, draw horiz road
-      if (!is_anything_above_below || is_anything_left_right)
-        render_sprite(renderer, sprites, 3,2, x, y);    
+      if (is_above && is_below) {
+        if (is_left && is_right)
+          render_sprite(renderer, sprites, 3,3, x,y);
+        else if (is_left)
+          render_sprite(renderer, sprites, 4,1, x,y);
+        else if (is_right)
+          render_sprite(renderer, sprites, 5,1, x,y);
+        else
+          render_sprite(renderer, sprites, 3,1, x,y);
+      }
+      else if (is_left && is_right) {
+        if (is_above)
+          render_sprite(renderer, sprites, 4,2, x,y);
+        else if (is_below)
+          render_sprite(renderer, sprites, 5,2, x,y);
+        else
+          render_sprite(renderer, sprites, 3,2, x,y);
+      }
+      else if (is_above) {
+        if (is_left)
+          render_sprite(renderer, sprites, 4,3, x,y);
+        else if (is_right)
+          render_sprite(renderer, sprites, 5,3, x,y);
+        else
+          render_sprite(renderer, sprites, 3,1, x,y); // vert default
+      }
+      else if (is_below) {
+        if (is_left)
+          render_sprite(renderer, sprites, 4,4, x,y);
+        else if (is_right)
+          render_sprite(renderer, sprites, 5,4, x,y);
+        else
+          render_sprite(renderer, sprites, 3,1, x,y); // vert default
+      }
+      else {
+        render_sprite(renderer, sprites, 3,2, x,y); // horiz default
+      }
     }
   }
 
@@ -1012,7 +1046,7 @@ void render(SDL_Renderer* renderer, Image* ui_bar_img, SDL_Texture* sprites, Ent
     if (nest->flags & DELETED)
       continue;
 
-    render_sprite(renderer, sprites, 4,1, nest->x, nest->y);
+    render_sprite(renderer, sprites, 5,0, nest->x, nest->y);
   }
 
   // draw bridges
@@ -1249,32 +1283,51 @@ bool is_ent_adj(Entity* ent1, Entity* ent2) {
 }
 
 bool is_adj(Entity* grid[], byte grid_flags[], int x, int y) {
-  return is_adj_horiz(grid, grid_flags, x, y) || is_adj_vert(grid, grid_flags, x, y);
+  return is_adj_left(grid, grid_flags, x, y, false) ||
+    is_adj_right(grid, grid_flags, x, y, false) ||
+    is_adj_above(grid, grid_flags, x, y, false) ||
+    is_adj_below(grid, grid_flags, x, y, false);
 }
 
-bool is_adj_horiz(Entity* grid[], byte grid_flags[], int x, int y) {
+bool is_adj_left(Entity* grid[], byte grid_flags[], int x, int y, bool road_only) {
   if (x > 0) {
     int left_pos = to_pos(x - 1, y);
-    if (grid_flags[left_pos] & ROAD || (grid[left_pos] && grid[left_pos]->flags & TURRET))
+    if (grid_flags[left_pos] & ROAD)
       return true;
-  }
-  if (x < num_blocks_w - 1) {
-    int right_pos = to_pos(x + 1, y);
-    if (grid_flags[right_pos] & ROAD || (grid[right_pos] && grid[right_pos]->flags & TURRET))
+    if (!road_only && (grid[left_pos] && grid[left_pos]->flags & TURRET))
       return true;
   }
   return false;
 }
 
-bool is_adj_vert(Entity* grid[], byte grid_flags[], int x, int y) {
-  if (y > 0) {
-    int above_pos = to_pos(x, y - 1);
-    if (grid_flags[above_pos] & ROAD || (grid[above_pos] && grid[above_pos]->flags & TURRET))
+bool is_adj_right(Entity* grid[], byte grid_flags[], int x, int y, bool road_only) {
+  if (x < num_blocks_w - 1) {
+    int right_pos = to_pos(x + 1, y);
+    if (grid_flags[right_pos] & ROAD)
+      return true;
+    if (!road_only && (grid[right_pos] && grid[right_pos]->flags & TURRET))
       return true;
   }
+  return false;
+}
+
+bool is_adj_above(Entity* grid[], byte grid_flags[], int x, int y, bool road_only) {
+  if (y > 0) {
+    int above_pos = to_pos(x, y - 1);
+    if (grid_flags[above_pos] & ROAD)
+      return true;
+    if (!road_only && (grid[above_pos] && grid[above_pos]->flags & TURRET))
+      return true;
+  }
+  return false;
+}
+
+bool is_adj_below(Entity* grid[], byte grid_flags[], int x, int y, bool road_only) {
   if (y < num_blocks_h - 1) {
     int below_pos = to_pos(x, y + 1);
-    if (grid_flags[below_pos] & ROAD || (grid[below_pos] && grid[below_pos]->flags & TURRET))
+    if (grid_flags[below_pos] & ROAD)
+      return true;
+    if (!road_only && (grid[below_pos] && grid[below_pos]->flags & TURRET))
       return true;
   }
   return false;
